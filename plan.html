@@ -1,0 +1,180 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); }
+.phase { margin-bottom: 24px; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); overflow: hidden; }
+.phase-header { padding: 14px 18px; display: flex; align-items: center; gap: 12px; cursor: pointer; background: var(--color-background-secondary); user-select: none; }
+.phase-header:hover { background: var(--color-background-tertiary); }
+.phase-num { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 500; flex-shrink: 0; }
+.phase-title { flex: 1; }
+.phase-title h3 { font-size: 15px; font-weight: 500; color: var(--color-text-primary); }
+.phase-title p { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; }
+.phase-tag { font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 4px; }
+.chevron { font-size: 12px; color: var(--color-text-tertiary); transition: transform 0.2s; }
+.phase-body { padding: 0 18px; max-height: 0; overflow: hidden; transition: max-height 0.3s ease, padding 0.2s; }
+.phase-body.open { max-height: 1000px; padding: 14px 18px; }
+.task { display: flex; gap: 12px; padding: 10px 0; border-bottom: 0.5px solid var(--color-border-tertiary); align-items: flex-start; }
+.task:last-child { border-bottom: none; }
+.task-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+.task-content { flex: 1; }
+.task-name { font-size: 14px; font-weight: 500; color: var(--color-text-primary); }
+.task-desc { font-size: 12px; color: var(--color-text-secondary); margin-top: 3px; line-height: 1.5; }
+.task-files { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.file-tag { font-size: 11px; font-family: var(--font-mono); background: var(--color-background-tertiary); color: var(--color-text-secondary); padding: 2px 7px; border-radius: 4px; border: 0.5px solid var(--color-border-tertiary); }
+.stack-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.stack-pill { font-size: 12px; padding: 4px 12px; border-radius: 20px; border: 0.5px solid var(--color-border-secondary); color: var(--color-text-secondary); background: var(--color-background-secondary); }
+</style>
+
+<div style="padding: 1rem 0 0.5rem;">
+  <div class="stack-row">
+    <span class="stack-pill">React + Vite + TypeScript</span>
+    <span class="stack-pill">shadcn/ui</span>
+    <span class="stack-pill">Tailwind CSS</span>
+    <span class="stack-pill">React Router</span>
+    <span class="stack-pill">Firebase Auth + Firestore</span>
+    <span class="stack-pill">Gemini 2.5 Flash API</span>
+  </div>
+</div>
+
+<div id="phases"></div>
+
+<script>
+const phases = [
+  {
+    num: 1,
+    title: "Project setup",
+    subtitle: "Scaffold, config, and local dev workflow (no deploy yet)",
+    color: "#5DCAA5", bg: "#E1F5EE", text: "#085041",
+    tag: "Day 1", tagBg: "#E1F5EE", tagColor: "#085041",
+    tasks: [
+      { name: "Scaffold (shadcn template)", desc: "Use your chosen React + Vite + TypeScript + shadcn/ui template. Verify Tailwind is wired, aliases work (e.g. @/), and the dev server runs.", files: ["vite.config.ts", "tsconfig.json", "tsconfig.app.json", "package.json"] },
+      { name: "shadcn/ui baseline", desc: "Confirm shadcn/ui is initialized and can add components. Add a couple core primitives (button, input, card) so UI building is fast.", files: ["components.json", "src/components/ui/"] },
+      { name: "Firebase project (local only)", desc: "Create project in console.firebase.google.com. Enable Firestore and Auth (Google + Email). Put config + API keys into .env.local (and ensure it’s gitignored).", files: [".env.local", "src/lib/firebase.ts"] },
+      { name: "Folder structure (TS-first)", desc: "Set up /pages, /components, /hooks, /lib, /services, /types — keep UI primitives in src/components/ui and app-specific components separate.", files: ["src/"] },
+      { name: "Local env + scripts sanity", desc: "Ensure typecheck, lint, and build commands are in place and green (or decide to add them later). No deployment steps until the app is feature-complete.", files: ["package.json"] },
+    ]
+  },
+  {
+    num: 2,
+    title: "Auth + user shell",
+    subtitle: "Login, routing, protected pages",
+    color: "#7F77DD", bg: "#EEEDFE", text: "#3C3489",
+    tag: "Day 2", tagBg: "#EEEDFE", tagColor: "#3C3489",
+    tasks: [
+      { name: "Auth hook/context", desc: "useAuth (or AuthProvider) wrapping Firebase onAuthStateChanged. Provides user + loading globally.", files: ["src/hooks/useAuth.ts", "src/context/AuthContext.tsx"] },
+      { name: "Login page (shadcn)", desc: "Google sign-in button + email/password form using shadcn components. Clean, minimal UI.", files: ["src/pages/Login.tsx"] },
+      { name: "Protected route wrapper", desc: "Route guard that redirects to /login if user is null (or shows spinner while auth loads).", files: ["src/components/ProtectedRoute.tsx"] },
+      { name: "App shell layout", desc: "Sidebar or top nav with user avatar, goals link, logout. Persistent across pages.", files: ["src/components/AppShell.tsx", "src/App.tsx"] },
+    ]
+  },
+  {
+    num: 3,
+    title: "AI plan generator",
+    subtitle: "The core feature — goal in, plan out",
+    color: "#EF9F27", bg: "#FAEEDA", text: "#633806",
+    tag: "Day 3–4", tagBg: "#FAEEDA", tagColor: "#633806",
+    tasks: [
+      { name: "AI service module", desc: "Single function callAI(prompt) using Gemini 2.5 Flash. All API calls go through here — easy to swap provider later.", files: ["src/services/ai.ts"] },
+      { name: "Plan generation prompt", desc: "Craft a system prompt that outputs structured JSON: { title, phases: [{ title, tasks: [{ title, desc, type }] }] }. Test heavily.", files: ["src/services/prompts.ts"] },
+      { name: "Goal intake screen", desc: "Big text input: 'What do you want to learn or build?'. Optional: time available per day. Generate button triggers AI call.", files: ["src/pages/NewGoal.tsx"] },
+      { name: "Save plan to Firestore", desc: "After AI returns JSON, save to users/{uid}/goals/{goalId}. Include createdAt, status: active.", files: ["src/services/goals.ts"] },
+      { name: "Loading state + error handling", desc: "Show a thinking animation while AI generates. Handle errors gracefully — retry button if it fails.", files: ["src/components/LoadingPlan.tsx"] },
+    ]
+  },
+  {
+    num: 4,
+    title: "Plan view UI",
+    subtitle: "The roadmap — expandable, clear, trustworthy",
+    color: "#378ADD", bg: "#E6F1FB", text: "#0C447C",
+    tag: "Day 5–6", tagBg: "#E6F1FB", tagColor: "#0C447C",
+    tasks: [
+      { name: "Goals dashboard", desc: "List of user's active goals. Card per goal showing title, progress %, streak. Click to open plan.", files: ["src/pages/Dashboard.tsx"] },
+      { name: "Plan page — phases", desc: "Accordion of phases. Each phase shows title, task count, completion progress. Collapsed by default.", files: ["src/pages/Plan.tsx", "src/components/PhaseCard.tsx"] },
+      { name: "Task list per phase", desc: "Expanding a phase shows its tasks as checklist items. Click task to open detail view.", files: ["src/components/TaskList.tsx", "src/components/TaskItem.tsx"] },
+      { name: "Task completion + Firestore sync", desc: "Check off a task → update Firestore → recalculate progress %. Optimistic UI update.", files: ["src/hooks/useGoal.ts"] },
+      { name: "Expand step with AI", desc: "Each task has a 'Go deeper' button — calls AI to break that task into 3–5 sub-steps and saves them.", files: ["src/components/TaskDetail.tsx"] },
+    ]
+  },
+  {
+    num: 5,
+    title: "Gamification layer",
+    subtitle: "XP, streaks, progress — the motivation engine",
+    color: "#D85A30", bg: "#FAECE7", text: "#712B13",
+    tag: "Day 7–8", tagBg: "#FAECE7", tagColor: "#712B13",
+    tasks: [
+      { name: "XP system", desc: "Each completed task awards XP based on type. Save totalXP + level to user doc in Firestore.", files: ["src/services/gamification.ts"] },
+      { name: "Streak tracker", desc: "Record lastActiveDate on each task completion. Show current streak + longest streak.", files: ["src/hooks/useStreak.ts"] },
+      { name: "Progress bar component", desc: "Animated progress bar per phase and overall. Shows % complete clearly.", files: ["src/components/ProgressBar.tsx"] },
+      { name: "Level + XP display", desc: "User level badge in the nav. XP bar showing progress to next level.", files: ["src/components/UserLevel.tsx"] },
+      { name: "Completion celebration", desc: "Small confetti or animation when a phase is completed. Feels good.", files: ["src/components/Celebration.tsx"] },
+    ]
+  },
+  {
+    num: 6,
+    title: "Schedule integration",
+    subtitle: "Fit the plan into real life",
+    color: "#888780", bg: "#F1EFE8", text: "#444441",
+    tag: "Day 9–10", tagBg: "#F1EFE8", tagColor: "#444441",
+    tasks: [
+      { name: "Daily task queue", desc: "Based on pace setting, surface 1–3 tasks to do today. Shown on dashboard as Today's Focus.", files: ["src/components/TodayFocus.tsx", "src/services/scheduler.ts"] },
+      { name: "Pace settings", desc: "User sets available time per day (15min / 30min / 1hr / custom). Affects how many tasks are queued daily.", files: ["src/pages/Settings.tsx"] },
+      { name: "Daily reminder (optional)", desc: "If user has notifications permission, send a daily browser notification at chosen time.", files: ["src/services/notifications.ts"] },
+      { name: "Missed day recovery", desc: "If user misses a day, app recalibrates instead of punishing. 'Pick up where you left off' messaging.", files: ["src/services/scheduler.ts"] },
+    ]
+  },
+  {
+    num: 7,
+    title: "Polish + launch",
+    subtitle: "Polish + readiness (hold off on deploy until done)",
+    color: "#5DCAA5", bg: "#E1F5EE", text: "#085041",
+    tag: "Day 11–14", tagBg: "#E1F5EE", tagColor: "#085041",
+    tasks: [
+      { name: "Mobile responsive", desc: "Test on mobile. Fix layout issues. The app should feel native on phone.", files: ["src/"] },
+      { name: "Empty states", desc: "Beautiful empty state on dashboard for new users. Clear CTA to create first goal.", files: ["src/components/EmptyState.tsx"] },
+      { name: "Onboarding flow", desc: "First-time user sees a 3-step intro before the goal input. Sets pace, explains the concept.", files: ["src/pages/Onboarding.tsx"] },
+      { name: "Share a goal", desc: "Generate a public read-only link to a plan. Great for showing off or getting accountability.", files: ["src/pages/PublicPlan.tsx"] },
+      { name: "Pre-deploy checklist (still no deploy)", desc: "Do a final pass: env separation, error boundaries, basic analytics (optional), and a clean build. Only then decide on hosting + domain.", files: ["src/", ".env.local"] },
+    ]
+  }
+];
+
+const container = document.getElementById('phases');
+phases.forEach((phase, i) => {
+  const div = document.createElement('div');
+  div.className = 'phase';
+  div.innerHTML = `
+    <div class="phase-header" onclick="toggle(${i})">
+      <div class="phase-num" style="background:${phase.bg};color:${phase.text}">${phase.num}</div>
+      <div class="phase-title">
+        <h3>${phase.title}</h3>
+        <p>${phase.subtitle}</p>
+      </div>
+      <span class="phase-tag" style="background:${phase.tagBg};color:${phase.tagColor}">${phase.tag}</span>
+      <span class="chevron" id="chev-${i}">▼</span>
+    </div>
+    <div class="phase-body" id="body-${i}">
+      ${phase.tasks.map(t => `
+        <div class="task">
+          <div class="task-dot" style="background:${phase.color}"></div>
+          <div class="task-content">
+            <div class="task-name">${t.name}</div>
+            <div class="task-desc">${t.desc}</div>
+            <div class="task-files">${t.files.map(f => `<span class="file-tag">${f}</span>`).join('')}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  container.appendChild(div);
+});
+
+function toggle(i) {
+  const body = document.getElementById('body-' + i);
+  const chev = document.getElementById('chev-' + i);
+  const isOpen = body.classList.contains('open');
+  body.classList.toggle('open', !isOpen);
+  chev.style.transform = isOpen ? '' : 'rotate(180deg)';
+}
+
+toggle(0);
+</script>
