@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { ArrowLeft } from "lucide-react"
 import { PhaseCard } from "@/components/PhaseCard"
 import { TaskChat } from "@/components/TaskChat"
 import { auth } from "@/lib/firebase"
-import { getGoal, updateTaskCompletion, type Goal, type Task } from "@/services/goals"
+import { getGoal, updateTaskCompletion, type Task } from "@/services/goals"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 interface PlanViewProps {
   goalId: string
@@ -19,31 +20,25 @@ interface ActiveChat {
 
 export function PlanView({ goalId, onBack }: PlanViewProps) {
   const user = auth.currentUser
-  const [goal, setGoal] = useState<Goal | null>(null)
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
   const [updating, setUpdating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [activeChat, setActiveChat] = useState<ActiveChat | null>(null)
 
-  useEffect(() => {
-    if (!user) return
-    setLoading(true)
-    getGoal(user.uid, goalId)
-      .then((data) => {
-        if (!data) setError("Goal not found")
-        else setGoal(data)
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load goal"))
-      .finally(() => setLoading(false))
-  }, [user, goalId])
+  const { data: goal, isLoading: loading, error } = useQuery({
+    queryKey: ['goal', goalId],
+    queryFn: () => (user ? getGoal(user.uid, goalId) : Promise.resolve(null)),
+    enabled: !!user && !!goalId,
+  })
 
   async function handleTaskToggle(phaseIndex: number, taskIndex: number, completed: boolean) {
     if (!user || !goal) return
     setUpdating(true)
     try {
       await updateTaskCompletion(user.uid, goalId, phaseIndex, taskIndex, completed)
-      const updated = await getGoal(user.uid, goalId)
-      if (updated) setGoal(updated)
+      // Refresh the specific goal query
+      await queryClient.invalidateQueries({ queryKey: ["goal", goalId] })
+      // Also refresh the overall goals list for the dashboard progress bars
+      await queryClient.invalidateQueries({ queryKey: ["goals"] })
     } catch (e) {
       console.error("Failed to update task:", e)
     } finally {
@@ -73,7 +68,7 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
     return (
       <div className="px-4 pt-8 space-y-4">
         <div className="rounded-2xl bg-destructive/10 border border-destructive/20 p-4">
-          <p className="text-sm text-destructive">{error ?? "Goal not found"}</p>
+          <p className="text-sm text-destructive">{(error as Error)?.message ?? "Goal not found"}</p>
         </div>
         {onBack && (
           <button
@@ -176,6 +171,8 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
           phaseTitle={activeChat.phaseTitle}
           phaseIndex={activeChat.phaseIndex}
           taskIndex={activeChat.taskIndex}
+          goalProfile={goal.profile}
+          phaseTasks={goal.phases[activeChat.phaseIndex].tasks}
           onClose={() => setActiveChat(null)}
         />
       )}

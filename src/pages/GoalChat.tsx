@@ -8,9 +8,11 @@ import {
   PLAN_READY_MARKER,
   generatePlanFromChatPrompt,
   PLAN_GENERATION_SYSTEM_PROMPT,
+  generateGoalProfilePrompt,
 } from "@/services/prompts"
-import { createGoal, type Goal, type ChatMessage } from "@/services/goals"
+import { createGoal, type Goal, type ChatMessage, type GoalProfile } from "@/services/goals"
 import { useModel } from "@/contexts/ModelContext"
+import { getUserProfile, type UserProfile } from "@/services/user"
 import { Markdown } from "@/components/Markdown"
 
 interface GoalChatProps {
@@ -37,10 +39,16 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
 
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
+
+  useEffect(() => {
+    if (!user) return
+    getUserProfile(user.uid).then(setUserProfile).catch(() => setUserProfile(null))
+  }, [user])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -67,9 +75,20 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
         .map((m) => `${m.role === "user" ? "User" : "Coach"}: ${m.content}`)
         .join("\n\n")
 
+      const systemPrompt =
+        userProfile && (userProfile.nickname || userProfile.preferredLanguage || userProfile.preferredLearningStyle)
+          ? `${GOAL_CHAT_SYSTEM_PROMPT}
+
+User profile for this conversation:
+- Nickname: ${userProfile.nickname ?? "not set"}
+- Preferred language: ${userProfile.preferredLanguage ?? "not specified"}
+- Preferred learning style: ${userProfile.preferredLearningStyle ?? "not specified"}
+- Tone preference: ${userProfile.preferredTone ?? "neutral"}`
+          : GOAL_CHAT_SYSTEM_PROMPT
+
       const raw = await callAI({
         prompt: history,
-        systemPrompt: GOAL_CHAT_SYSTEM_PROMPT,
+        systemPrompt,
         temperature: 0.8,
         maxOutputTokens: 350,
         modelName: selectedModel,
@@ -96,17 +115,38 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
     setGenError(null)
 
     try {
-      const prompt = generatePlanFromChatPrompt(messages)
+      // 1) Build the plan from the conversation
+      const planPrompt = generatePlanFromChatPrompt(messages)
       const plan = await callAIStructured<
         Omit<Goal, "id" | "uid" | "status" | "createdAt" | "progress">
       >({
-        prompt,
+        prompt: planPrompt,
         systemPrompt: PLAN_GENERATION_SYSTEM_PROMPT,
         temperature: 0.2,
         maxOutputTokens: 5000,
         modelName: selectedModel,
       })
-      const goalId = await createGoal(user.uid, plan as Goal)
+
+      // 2) Distill a reusable per-goal profile (\"memory\") from the same conversation
+      const profilePrompt = generateGoalProfilePrompt(messages)
+      let profile: GoalProfile | undefined
+      try {
+        profile = await callAIStructured<GoalProfile>({
+          prompt: profilePrompt,
+          temperature: 0.1,
+          maxOutputTokens: 600,
+          modelName: selectedModel,
+        })
+      } catch {
+        profile = undefined
+      }
+
+      const goalPayload: Goal = {
+        ...(plan as Goal),
+        profile,
+      }
+
+      const goalId = await createGoal(user.uid, goalPayload)
       onSuccess(goalId)
     } catch (e) {
       console.error("Plan generation error:", e)
@@ -176,19 +216,25 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
                 <Sparkles className="h-3 w-3 text-brand" />
               </div>
             )}
+            {(() => {
+              const isRtl = /[\u0600-\u06FF]/.test(msg.content)
+              return (
             <div
+              dir={isRtl ? "rtl" : "ltr"}
               className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
                 msg.role === "user"
                   ? "bg-primary text-primary-foreground rounded-br-sm"
                   : "bg-muted text-foreground rounded-bl-sm"
-              }`}
+              } ${isRtl ? "text-right" : ""}`}
             >
               {msg.role === "assistant" ? (
-                <Markdown content={msg.content} />
+                <Markdown content={msg.content} className={isRtl ? "text-right" : undefined} />
               ) : (
                 <span className="whitespace-pre-wrap">{msg.content}</span>
               )}
             </div>
+              )
+            })()}
           </div>
         ))}
 

@@ -1,12 +1,13 @@
 import { useState, useRef, useEffect } from "react"
 import { ArrowLeft, Send, Sparkles } from "lucide-react"
-import type { Task, ChatMessage } from "@/services/goals"
+import type { Task, ChatMessage, GoalProfile } from "@/services/goals"
 import { saveTaskChat, loadTaskChat } from "@/services/goals"
 import { auth } from "@/lib/firebase"
 import { callAI } from "@/services/ai"
 import { generateTaskGuideSystemPrompt, generateTaskSuggestedPrompt } from "@/services/prompts"
 import { useModel } from "@/contexts/ModelContext"
 import { Markdown } from "@/components/Markdown"
+import { getUserProfile, type UserProfile } from "@/services/user"
 
 interface TaskChatProps {
   task: Task
@@ -16,6 +17,8 @@ interface TaskChatProps {
   phaseIndex: number
   taskIndex: number
   onClose: () => void
+  goalProfile?: GoalProfile
+  phaseTasks: Task[]
 }
 
 function scrollToBottom(el: HTMLDivElement | null, smooth = true) {
@@ -31,6 +34,8 @@ export function TaskChat({
   phaseIndex,
   taskIndex,
   onClose,
+  goalProfile,
+  phaseTasks,
 }: TaskChatProps) {
   const { selectedModel } = useModel()
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -42,6 +47,7 @@ export function TaskChat({
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const prevLengthRef = useRef(0)
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
 
   function parseDuwitPayload(text: string): {
     clean: string
@@ -73,6 +79,12 @@ export function TaskChat({
   useEffect(() => {
     document.body.style.overflow = "hidden"
     return () => { document.body.style.overflow = "" }
+  }, [])
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid
+    if (!uid) return
+    getUserProfile(uid).then(setUserProfile).catch(() => setUserProfile(null))
   }, [])
 
   useEffect(() => {
@@ -129,7 +141,42 @@ export function TaskChat({
     setSending(true)
 
     try {
-      const systemPrompt = generateTaskGuideSystemPrompt(goalTitle, phaseTitle, task)
+      let systemPrompt = generateTaskGuideSystemPrompt(goalTitle, phaseTitle, task)
+
+      // Enrich system prompt with global user profile and per-goal profile + phase context
+      const lines: string[] = []
+      if (userProfile && (userProfile.nickname || userProfile.preferredLanguage || userProfile.preferredLearningStyle)) {
+        lines.push("User profile:")
+        if (userProfile.nickname) lines.push(`- Nickname: ${userProfile.nickname}`)
+        if (userProfile.preferredLanguage) lines.push(`- Preferred language: ${userProfile.preferredLanguage}`)
+        if (userProfile.preferredLearningStyle)
+          lines.push(`- Learning style: ${userProfile.preferredLearningStyle}`)
+        if (userProfile.preferredTone) lines.push(`- Tone: ${userProfile.preferredTone}`)
+      }
+      if (goalProfile) {
+        lines.push("", "Goal-specific profile (for this project):")
+        lines.push(`- Experience level: ${goalProfile.experienceLevel}`)
+        lines.push(`- Time per day: ${goalProfile.timePerDay}`)
+        lines.push(`- Motivation: ${goalProfile.motivation}`)
+        lines.push(`- Success definition: ${goalProfile.successDefinition}`)
+        if (goalProfile.notes) lines.push(`- Notes: ${goalProfile.notes}`)
+      }
+      if (phaseTasks.length > 0) {
+        lines.push("", "Phase tasks and completion state:")
+        phaseTasks.forEach((t, idx) => {
+          const status = t.completed ? "[x]" : "[ ]"
+          const marker = idx === taskIndex ? " (CURRENT)" : ""
+          lines.push(`${status} ${idx + 1}. ${t.title}${marker}`)
+        })
+        lines.push(
+          "",
+          "Use this to avoid re-teaching earlier tasks; you can reference what was already done when helpful.",
+          "When the user seems to have achieved the outcome of this CURRENT task, explicitly tell them they can mark it complete and (optionally) move on to the next task.",
+        )
+      }
+      if (lines.length > 0) {
+        systemPrompt = `${systemPrompt}\n\nADDITIONAL CONTEXT:\n${lines.join("\n")}`
+      }
       const history = updated
         .map((m) => `${m.role === "user" ? "User" : "Guide"}: ${m.content}`)
         .join("\n\n")
@@ -233,16 +280,20 @@ export function TaskChat({
                   key={i}
                   className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}
                 >
+                  {(() => {
+                    const isRtl = /[\u0600-\u06FF]/.test(msg.content)
+                    return (
                   <div className="max-w-[85%]">
                     <div
+                      dir={isRtl ? "rtl" : "ltr"}
                       className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
                         msg.role === "user"
                           ? "bg-primary text-primary-foreground rounded-br-sm"
                           : "bg-muted text-foreground rounded-bl-sm"
-                      }`}
+                      } ${isRtl ? "text-right" : ""}`}
                     >
                       {msg.role === "assistant" ? (
-                        <Markdown content={msg.content} />
+                        <Markdown content={msg.content} className={isRtl ? "text-right" : undefined} />
                       ) : (
                         <span className="whitespace-pre-wrap">{msg.content}</span>
                       )}
@@ -276,6 +327,8 @@ export function TaskChat({
                       </div>
                     ) : null}
                   </div>
+                    )
+                  })()}
                 </div>
               ))}
 

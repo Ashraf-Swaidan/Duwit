@@ -78,6 +78,29 @@ Then create a comprehensive, realistic JSON plan that is calibrated to their EXA
 This plan must feel like it was made specifically for THIS person, not a generic template.`
 }
 
+export function generateGoalProfilePrompt(messages: ChatMessage[]): string {
+  const conversation = messages
+    .map((m) => `${m.role === "user" ? "User" : "Coach"}: ${m.content}`)
+    .join("\n\n")
+
+  return `You are creating a compact \"goal profile\" for an AI coach inside a learning app.
+
+Below is a discovery chat between a user and the coach:
+
+=== CONVERSATION ===
+${conversation}
+====================
+
+From this, extract a JSON object with fields:
+- experienceLevel: "beginner" | "intermediate" | "advanced"
+- timePerDay: short phrase summarizing realistic daily time (e.g. "30 minutes", "1–2 hours")
+- motivation: 1–3 sentences capturing why this goal matters to them
+- successDefinition: 1–2 sentences describing what \"done\" looks like to them
+- notes: 1–3 sentences with any extra constraints, prior knowledge, preferences, or risks that would matter for future guidance
+
+RESPOND WITH JSON ONLY. No markdown, no backticks, no commentary.`
+}
+
 export function generateTaskGuideSystemPrompt(goalTitle: string, phaseTitle: string, task: Task): string {
   return `You are a focused, practical AI guide helping someone work on a specific task in their learning plan.
 

@@ -24,6 +24,19 @@ export interface Phase {
   tasks: Task[]
 }
 
+export interface GoalProfile {
+  // High-level sense of where they are starting from
+  experienceLevel: "beginner" | "intermediate" | "advanced"
+  // Free-form description like "30 minutes", "1–2 hours", etc.
+  timePerDay: string
+  // Why they care about this goal
+  motivation: string
+  // What success looks like in their own words
+  successDefinition: string
+  // Optional extra notes the AI thinks will help (constraints, preferences, prior knowledge)
+  notes?: string
+}
+
 export interface Goal {
   id?: string
   uid?: string
@@ -34,6 +47,8 @@ export interface Goal {
   createdAt: string
   completedAt?: string
   progress?: number
+  // Per-goal \"memory\" distilled from the discovery chat
+  profile?: GoalProfile
 }
 
 export async function createGoal(uid: string, goal: Goal): Promise<string> {

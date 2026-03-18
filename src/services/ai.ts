@@ -38,20 +38,10 @@ export async function callAIStructured<T = Record<string, unknown>>({
   maxOutputTokens = 2000,
   modelName,
 }: AICallOptions): Promise<T> {
-  console.log("=== AI STRUCTURED CALL ===")
-  console.log("System Prompt:", systemPrompt?.substring(0, 200) + "...")
-  console.log("User Prompt:", prompt)
-  console.log("Temperature:", temperature)
-  console.log("Max Tokens:", maxOutputTokens)
-  console.log("Model:", modelName ?? "default")
 
   const text = await callAI({ prompt, systemPrompt, temperature, maxOutputTokens, modelName })
 
-  console.log("=== RAW AI RESPONSE ===")
-  console.log("Length:", text.length)
-  console.log("First 500 chars:", text.substring(0, 500))
-  console.log("Last 500 chars:", text.substring(Math.max(0, text.length - 500)))
-
+  
   try {
     console.log("=== ATTEMPT 1: Direct JSON.parse ===")
     const result = JSON.parse(text) as T

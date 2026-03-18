@@ -35,6 +35,9 @@ export function AuthForm({ onSuccess }: AuthFormProps) {
           email,
           displayName,
           createdAt: new Date().toISOString(),
+          profile: {
+            nickname: displayName || email.split("@")[0],
+          },
         })
         onSuccess?.()
       } else {
