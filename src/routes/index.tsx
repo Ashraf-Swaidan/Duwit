@@ -27,7 +27,7 @@ function DashboardPage() {
   const totalCompleted = goals.reduce((sum, g) => sum + ((g.progress ?? 0) >= 100 ? 1 : 0), 0)
 
   return (
-    <div className="px-4 pt-8 pb-24 space-y-8">
+    <div className="max-w-4xl mx-auto px-4 pt-8 pb-24 space-y-8">
       {/* Greeting */}
       <div>
         <p className="text-muted-foreground text-sm font-medium">{greeting}</p>
@@ -58,7 +58,7 @@ function DashboardPage() {
           <div className="text-5xl">🎯</div>
           <div>
             <h3 className="font-bold text-lg">What's your first goal?</h3>
-            <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">
+            <p className="text-sm text-muted-foreground mt-1 max-w-lg mx-auto">
               Tell us what you want to achieve and we'll build a personalized plan for you.
             </p>
           </div>

@@ -31,7 +31,7 @@ function RootComponent() {
     <div className="min-h-svh bg-background flex flex-col">
       {/* Sticky header */}
       <header className="sticky top-0 z-40 bg-background/85 backdrop-blur-md border-b border-border/60">
-        <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
           <Link
             to="/"
             className="font-black text-xl tracking-tight hover:opacity-60 transition-opacity"
@@ -63,7 +63,7 @@ function RootComponent() {
       </header>
 
       {/* Main content area */}
-      <main className="flex-1 max-w-lg mx-auto w-full">
+      <main className="flex-1 w-full min-h-0">
         {authLoading ? (
           <div className="flex h-[60vh] flex-col items-center justify-center gap-6 animate-in zoom-in-95 fade-in duration-500">
             <div className="flex flex-col items-center">

@@ -35,9 +35,7 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
     setUpdating(true)
     try {
       await updateTaskCompletion(user.uid, goalId, phaseIndex, taskIndex, completed)
-      // Refresh the specific goal query
       await queryClient.invalidateQueries({ queryKey: ["goal", goalId] })
-      // Also refresh the overall goals list for the dashboard progress bars
       await queryClient.invalidateQueries({ queryKey: ["goals"] })
     } catch (e) {
       console.error("Failed to update task:", e)
@@ -88,95 +86,135 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
   const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0
 
   return (
-    <>
-      <div className="px-4 pt-6 pb-24 space-y-6">
-        {/* Back nav */}
-        {onBack && (
-          <button
-            onClick={onBack}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors -ml-1"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            My Goals
-          </button>
-        )}
-
-        {/* Goal header */}
-        <div className="space-y-4">
-          <div>
-            <h1 className="text-2xl font-black tracking-tight leading-tight">
-              {goal.title}
-            </h1>
-            {goal.description && (
-              <p className="text-sm text-muted-foreground mt-1">{goal.description}</p>
-            )}
-          </div>
-
-          {/* Progress */}
-          <div className="bg-card rounded-2xl border p-4 space-y-3">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Overall progress</span>
-              <span className="font-bold">{doneTasks}/{totalTasks} tasks</span>
-            </div>
-            <div className="h-2.5 w-full bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full bg-brand transition-all duration-700 ease-out"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex gap-1">
-                {goal.phases.map((phase, i) => {
-                  const pTotal = phase.tasks.length
-                  const pDone = phase.tasks.filter((t) => t.completed).length
-                  const full = pDone === pTotal && pTotal > 0
-                  return (
-                    <div
-                      key={i}
-                      className={`h-1.5 flex-1 rounded-full transition-colors ${
-                        full ? "bg-brand" : pDone > 0 ? "bg-brand/50" : "bg-muted-foreground/20"
-                      }`}
-                    />
-                  )
-                })}
+    <div className="h-[calc(100vh-3.5rem)] flex flex-col bg-background overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
+        {/* Main Plan Area */}
+        <div
+          className={`h-full overflow-y-auto transition-all duration-300 scroll-smooth ${
+            activeChat ? "hidden lg:block lg:w-2/5 lg:max-w-sm xl:max-w-md lg:border-r border-border/60" : "w-full"
+          }`}
+        >
+          <div className="px-4 pt-6 pb-24 space-y-6 max-w-4xl mx-auto">
+            {/* Goal header with back button */}
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                {onBack && (
+                  <button
+                    onClick={onBack}
+                    className="shrink-0 mt-1 p-1 -ml-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    title="Back to My Goals"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                )}
+                <div className="flex-1 min-w-0">
+                  <h1 className="text-2xl font-black tracking-tight leading-tight">
+                    {goal.title}
+                  </h1>
+                  {goal.description && (
+                    <p className="text-sm text-muted-foreground mt-1">{goal.description}</p>
+                  )}
+                </div>
               </div>
-              <span className="text-xs font-bold text-muted-foreground ml-3">{progress}%</span>
+
+              {/* Progress */}
+              <div className="bg-card rounded-2xl border p-4 space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Overall progress</span>
+                  <span className="font-bold">{doneTasks}/{totalTasks} tasks</span>
+                </div>
+                <div className="h-2.5 w-full bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-brand transition-all duration-700 ease-out"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex gap-1 flex-1">
+                    {goal.phases.map((phase, i) => {
+                      const pTotal = phase.tasks.length
+                      const pDone = phase.tasks.filter((t) => t.completed).length
+                      const full = pDone === pTotal && pTotal > 0
+                      return (
+                        <div
+                          key={i}
+                          className={`h-1.5 flex-1 rounded-full transition-colors ${
+                            full ? "bg-brand" : pDone > 0 ? "bg-brand/50" : "bg-muted-foreground/20"
+                          }`}
+                        />
+                      )
+                    })}
+                  </div>
+                  <span className="text-xs font-bold text-muted-foreground ml-3">{progress}%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Phases */}
+            <div className="space-y-3">
+              {goal.phases.map((phase, phaseIndex) => (
+                <PhaseCard
+                  key={phaseIndex}
+                  phase={phase}
+                  phaseIndex={phaseIndex}
+                  goalId={goalId}
+                  goalTitle={goal.title}
+                  onTaskToggle={handleTaskToggle}
+                  onOpenGuide={handleOpenGuide}
+                  loading={updating}
+                  activeTaskIndex={activeChat?.phaseIndex === phaseIndex ? activeChat.taskIndex : undefined}
+                />
+              ))}
             </div>
           </div>
         </div>
 
-        {/* Phases */}
-        <div className="space-y-3">
-          {goal.phases.map((phase, phaseIndex) => (
-            <PhaseCard
-              key={phaseIndex}
-              phase={phase}
-              phaseIndex={phaseIndex}
+        {/* Chat Area (Responsive) */}
+        {activeChat && (
+          <div className="flex-1 bg-background relative z-40 lg:z-0 animate-in slide-in-from-right duration-300 h-full overflow-hidden">
+            <TaskChat
+              task={activeChat.task}
               goalId={goalId}
               goalTitle={goal.title}
-              onTaskToggle={handleTaskToggle}
-              onOpenGuide={handleOpenGuide}
-              loading={updating}
-            />
-          ))}
-        </div>
-      </div>
+              phaseTitle={activeChat.phaseTitle}
+              phaseIndex={activeChat.phaseIndex}
+              taskIndex={activeChat.taskIndex}
+              goalProfile={goal.profile}
+              phaseTasks={goal.phases[activeChat.phaseIndex].tasks}
+              onClose={() => setActiveChat(null)}
+              isDesktopSideView={true}
+              onNavigateTask={(direction: number) => {
+                let nextPhaseIndex = activeChat.phaseIndex
+                let nextTaskIndex = activeChat.taskIndex + direction
 
-      {/* Full-screen chat overlay */}
-      {activeChat && (
-        <TaskChat
-          task={activeChat.task}
-          goalId={goalId}
-          goalTitle={goal.title}
-          phaseTitle={activeChat.phaseTitle}
-          phaseIndex={activeChat.phaseIndex}
-          taskIndex={activeChat.taskIndex}
-          goalProfile={goal.profile}
-          phaseTasks={goal.phases[activeChat.phaseIndex].tasks}
-          onClose={() => setActiveChat(null)}
-        />
-      )}
-    </>
+                if (nextTaskIndex < 0) {
+                  nextPhaseIndex--
+                  if (nextPhaseIndex >= 0) {
+                    nextTaskIndex = goal.phases[nextPhaseIndex].tasks.length - 1
+                  } else {
+                    return
+                  }
+                } else if (nextTaskIndex >= goal.phases[nextPhaseIndex].tasks.length) {
+                  nextPhaseIndex++
+                  if (nextPhaseIndex < goal.phases.length) {
+                    nextTaskIndex = 0
+                  } else {
+                    return
+                  }
+                }
+
+                handleOpenGuide(nextPhaseIndex, nextTaskIndex)
+              }}
+              hasPrevTask={activeChat.phaseIndex > 0 || activeChat.taskIndex > 0}
+              hasNextTask={
+                activeChat.phaseIndex < goal.phases.length - 1 ||
+                activeChat.taskIndex < goal.phases[activeChat.phaseIndex].tasks.length - 1
+              }
+            />
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

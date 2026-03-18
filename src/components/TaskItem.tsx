@@ -1,4 +1,3 @@
-import { MessageCircle } from "lucide-react"
 import type { Task } from "@/services/goals"
 
 interface TaskItemProps {
@@ -11,6 +10,7 @@ interface TaskItemProps {
   onToggle: (phaseIndex: number, taskIndex: number, completed: boolean) => void
   onOpenGuide: (phaseIndex: number, taskIndex: number) => void
   loading?: boolean
+  isActive?: boolean
 }
 
 const typeConfig: Record<Task["type"], { label: string; classes: string }> = {
@@ -28,20 +28,31 @@ export function TaskItem({
   onToggle,
   onOpenGuide,
   loading,
+  isActive,
 }: TaskItemProps) {
   const type = typeConfig[task.type] ?? typeConfig.learn
 
   return (
     <div
-      className={`rounded-xl px-3 py-3 flex items-start gap-3 transition-colors ${
-        task.completed ? "opacity-60" : "hover:bg-muted/40"
+      className={`rounded-xl px-3 py-3 flex items-start gap-3 transition-all group border-2 ${
+        isActive 
+          ? "bg-brand/5 border-brand/20" 
+          : "border-transparent " + (task.completed ? "opacity-60" : "hover:bg-muted/60 cursor-pointer active:scale-[0.98]")
       }`}
+      onClick={(e) => {
+        // Don't open guide if clicking the checkbox button
+        if ((e.target as HTMLElement).closest('button[role="checkbox"]')) return;
+        onOpenGuide(phaseIndex, taskIndex);
+      }}
     >
       {/* Custom checkbox */}
       <button
         role="checkbox"
         aria-checked={task.completed}
-        onClick={() => onToggle(phaseIndex, taskIndex, !task.completed)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle(phaseIndex, taskIndex, !task.completed);
+        }}
         disabled={loading}
         className={`mt-0.5 h-5 w-5 shrink-0 rounded-full border-2 flex items-center justify-center transition-all ${
           task.completed
@@ -73,7 +84,6 @@ export function TaskItem({
 
         <p className="text-xs text-muted-foreground leading-relaxed mb-2">{task.description}</p>
 
-        <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">
             {task.estimatedDays} {task.estimatedDays === 1 ? "day" : "days"}
             {task.completedAt && (
@@ -82,15 +92,6 @@ export function TaskItem({
               </span>
             )}
           </span>
-
-          <button
-            onClick={() => onOpenGuide(phaseIndex, taskIndex)}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors py-0.5"
-          >
-            <MessageCircle className="h-3.5 w-3.5" />
-            Guide
-          </button>
-        </div>
       </div>
     </div>
   )

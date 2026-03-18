@@ -64,7 +64,7 @@ export function NewGoal({ onSuccess, onBack }: NewGoalProps) {
   }
 
   return (
-    <div className="min-h-[calc(100svh-3.5rem)] flex flex-col px-4 pt-6 pb-8">
+    <div className="max-w-2xl mx-auto min-h-[calc(100svh-3.5rem)] flex flex-col px-4 pt-6 pb-8">
       {/* Back nav */}
       {onBack && (
         <button

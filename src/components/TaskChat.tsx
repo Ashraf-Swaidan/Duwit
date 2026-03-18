@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react"
-import { ArrowLeft, Send, Sparkles } from "lucide-react"
+import { ArrowLeft, ChevronLeft, ChevronRight, Send, Sparkles } from "lucide-react"
 import type { Task, ChatMessage, GoalProfile } from "@/services/goals"
 import { saveTaskChat, loadTaskChat } from "@/services/goals"
 import { auth } from "@/lib/firebase"
@@ -19,6 +19,10 @@ interface TaskChatProps {
   onClose: () => void
   goalProfile?: GoalProfile
   phaseTasks: Task[]
+  isDesktopSideView?: boolean
+  onNavigateTask?: (direction: number) => void
+  hasPrevTask?: boolean
+  hasNextTask?: boolean
 }
 
 function scrollToBottom(el: HTMLDivElement | null, smooth = true) {
@@ -36,6 +40,10 @@ export function TaskChat({
   onClose,
   goalProfile,
   phaseTasks,
+  isDesktopSideView,
+  onNavigateTask,
+  hasPrevTask,
+  hasNextTask,
 }: TaskChatProps) {
   const { selectedModel } = useModel()
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -43,11 +51,15 @@ export function TaskChat({
   const [input, setInput] = useState("")
   const [loadingHistory, setLoadingHistory] = useState(true)
   const [sending, setSending] = useState(false)
-  const [suggestedPrompt] = useState(() => generateTaskSuggestedPrompt(task))
+  const [suggestedPrompt, setSuggestedPrompt] = useState(() => generateTaskSuggestedPrompt(task))
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const prevLengthRef = useRef(0)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+
+  useEffect(() => {
+    setSuggestedPrompt(generateTaskSuggestedPrompt(task))
+  }, [task])
 
   function parseDuwitPayload(text: string): {
     clean: string
@@ -75,11 +87,12 @@ export function TaskChat({
     return `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`
   }
 
-  // Lock body scroll when open
+  // Lock body scroll when open (only for mobile overlay)
   useEffect(() => {
+    if (isDesktopSideView) return
     document.body.style.overflow = "hidden"
     return () => { document.body.style.overflow = "" }
-  }, [])
+  }, [isDesktopSideView])
 
   useEffect(() => {
     const uid = auth.currentUser?.uid
@@ -90,9 +103,9 @@ export function TaskChat({
   useEffect(() => {
     const uid = auth.currentUser?.uid
     if (!uid) { setLoadingHistory(false); return }
+    setLoadingHistory(true)
     loadTaskChat(uid, goalId, phaseIndex, taskIndex)
       .then((saved) => {
-        // Parse any embedded payloads (future-proof)
         const nextMeta: Record<number, { youtubeSearches: string[]; channels: string[] }> = {}
         const cleaned = saved.map((m, idx) => {
           if (m.role !== "assistant") return m
@@ -137,13 +150,18 @@ export function TaskChat({
     const userMsg: ChatMessage = { role: "user", content: trimmed }
     const updated = [...messages, userMsg]
     setMessages(updated)
-    setInput("")
+    setInput(
+      // reset auto-height
+      ""
+    )
+    if (inputRef.current) {
+      inputRef.current.style.height = "auto"
+    }
     setSending(true)
 
     try {
       let systemPrompt = generateTaskGuideSystemPrompt(goalTitle, phaseTitle, task)
 
-      // Enrich system prompt with global user profile and per-goal profile + phase context
       const lines: string[] = []
       if (userProfile && (userProfile.nickname || userProfile.preferredLanguage || userProfile.preferredLearningStyle)) {
         lines.push("User profile:")
@@ -190,13 +208,13 @@ export function TaskChat({
       const parsed = parseDuwitPayload(response)
       const assistantIndex = updated.length
       if (parsed.meta) {
-        setYoutubeMeta((prev) => ({ ...prev, [assistantIndex]: parsed.meta! }))
+        setYoutubeMeta((prev: Record<number, { youtubeSearches: string[]; channels: string[] }>) => ({ ...prev, [assistantIndex]: parsed.meta! }))
       }
       const final: ChatMessage[] = [...updated, { role: "assistant", content: parsed.clean }]
       setMessages(final)
       if (uid) saveTaskChat(uid, goalId, phaseIndex, taskIndex, final).catch(console.error)
     } catch {
-      setMessages((prev) => [
+      setMessages((prev: ChatMessage[]) => [
         ...prev,
         { role: "assistant", content: "Sorry, couldn't get a response. Please try again." },
       ])
@@ -213,35 +231,64 @@ export function TaskChat({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background animate-in fade-in duration-200">
-      {/* Header */}
-      <div className="shrink-0 border-b border-border/60 bg-background/95 backdrop-blur-sm">
-        <div className="max-w-lg mx-auto px-4 h-14 flex items-center gap-3">
+    <div className={`${isDesktopSideView ? 'h-full' : 'fixed inset-0 z-50'} flex flex-col bg-background animate-in fade-in duration-200`}>
+      {/* ── Unified context bar ── */}
+      <div className="shrink-0 border-b border-border/40 bg-background/95 backdrop-blur-sm">
+        <div className="px-3 h-11 flex items-center gap-2">
+
+          {/* Back / close button */}
           <button
             onClick={onClose}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0 -ml-1"
+            className="shrink-0 h-7 w-7 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="Back to plan"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
 
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-muted-foreground leading-none mb-0.5">AI Guide</p>
-            <h2 className="font-bold text-sm leading-snug truncate">{task.title}</h2>
+          {/* Breadcrumb: phase › task */}
+          <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-hidden">
+            <span className="text-[11px] text-muted-foreground truncate shrink-0 max-w-[100px] sm:max-w-[160px]">
+              {phaseTitle}
+            </span>
+            <span className="text-muted-foreground/40 shrink-0 text-[11px]">›</span>
+            <span className="text-[11px] font-semibold text-foreground truncate">
+              {task.title}
+            </span>
           </div>
 
-          <div className="shrink-0 flex items-center gap-1.5 bg-brand/10 text-brand px-2.5 py-1 rounded-full">
+          {/* AI badge */}
+          <div className="shrink-0 flex items-center gap-1 bg-brand/10 text-brand px-2 py-0.5 rounded-full border border-brand/20">
             <Sparkles className="h-3 w-3" />
-            <span className="text-xs font-semibold">AI</span>
+            <span className="text-[9px] font-black uppercase tracking-tight">AI</span>
           </div>
+
+          {/* Prev / Next arrows */}
+          {onNavigateTask && (
+            <div className="shrink-0 flex items-center gap-0.5 border-l border-border/60 pl-2 ml-1">
+              <button
+                disabled={!hasPrevTask}
+                onClick={() => onNavigateTask(-1)}
+                className="h-6 w-6 flex items-center justify-center rounded-full hover:bg-muted text-muted-foreground disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
+                title="Previous task"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <button
+                disabled={!hasNextTask}
+                onClick={() => onNavigateTask(1)}
+                className="h-6 w-6 flex items-center justify-center rounded-full hover:bg-muted text-muted-foreground disabled:opacity-25 disabled:hover:bg-transparent transition-colors"
+                title="Next task"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Messages */}
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto overscroll-contain"
-      >
-        <div className="max-w-lg mx-auto px-4 py-6 space-y-4">
+      {/* ── Messages ── */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <div className={`mx-auto px-4 pt-5 pb-4 space-y-4 ${isDesktopSideView ? 'max-w-3xl' : 'max-w-lg'}`}>
           {loadingHistory ? (
             <div className="flex justify-center py-12">
               <div className="flex gap-1.5">
@@ -251,14 +298,14 @@ export function TaskChat({
               </div>
             </div>
           ) : messages.length === 0 ? (
-            <div className="space-y-6">
+            <div className="space-y-5">
               {/* Task context card */}
-              <div className="rounded-2xl bg-muted/40 border p-4 space-y-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Your task
-                </p>
+              <div className="rounded-2xl bg-muted/40 border p-4 space-y-1.5">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Your task</p>
                 <p className="text-sm font-semibold">{task.title}</p>
-                <p className="text-xs text-muted-foreground leading-relaxed">{task.description}</p>
+                {task.description && (
+                  <p className="text-xs text-muted-foreground leading-relaxed">{task.description}</p>
+                )}
               </div>
 
               {/* Suggested prompt */}
@@ -275,62 +322,60 @@ export function TaskChat({
             </div>
           ) : (
             <div className="space-y-4">
-              {messages.map((msg, i) => (
-                <div
-                  key={i}
-                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}
-                >
-                  {(() => {
-                    const isRtl = /[\u0600-\u06FF]/.test(msg.content)
-                    return (
-                  <div className="max-w-[85%]">
-                    <div
-                      dir={isRtl ? "rtl" : "ltr"}
-                      className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
-                        msg.role === "user"
-                          ? "bg-primary text-primary-foreground rounded-br-sm"
-                          : "bg-muted text-foreground rounded-bl-sm"
-                      } ${isRtl ? "text-right" : ""}`}
-                    >
-                      {msg.role === "assistant" ? (
-                        <Markdown content={msg.content} className={isRtl ? "text-right" : undefined} />
-                      ) : (
-                        <span className="whitespace-pre-wrap">{msg.content}</span>
-                      )}
-                    </div>
-
-                    {/* YouTube search chips (assistant only) */}
-                    {msg.role === "assistant" && youtubeMeta[i] ? (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {youtubeMeta[i].youtubeSearches.map((q, qi) => (
-                          <a
-                            key={`y-${qi}`}
-                            href={youtubeSearchUrl(q)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="rounded-full border bg-background/70 px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-brand/40 hover:bg-brand/5 transition-colors"
-                          >
-                            Search YouTube: {q}
-                          </a>
-                        ))}
-                        {youtubeMeta[i].channels.map((c, ci) => (
-                          <a
-                            key={`c-${ci}`}
-                            href={youtubeSearchUrl(c)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="rounded-full border bg-background/70 px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-brand/40 hover:bg-brand/5 transition-colors"
-                          >
-                            Channel: {c}
-                          </a>
-                        ))}
+              {messages.map((msg: ChatMessage, i: number) => {
+                const isRtl = /[\u0600-\u06FF]/.test(msg.content)
+                return (
+                  <div
+                    key={i}
+                    className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}
+                  >
+                    <div className="max-w-[85%]">
+                      <div
+                        dir={isRtl ? "rtl" : "ltr"}
+                        className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                          msg.role === "user"
+                            ? "bg-primary text-primary-foreground rounded-br-sm"
+                            : "bg-muted text-foreground rounded-bl-sm"
+                        } ${isRtl ? "text-right" : ""}`}
+                      >
+                        {msg.role === "assistant" ? (
+                          <Markdown content={msg.content} className={isRtl ? "text-right" : undefined} />
+                        ) : (
+                          <span className="whitespace-pre-wrap">{msg.content}</span>
+                        )}
                       </div>
-                    ) : null}
+
+                      {/* YouTube search chips */}
+                      {msg.role === "assistant" && youtubeMeta[i] ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {youtubeMeta[i].youtubeSearches.map((q: string, qi: number) => (
+                            <a
+                              key={`y-${qi}`}
+                              href={youtubeSearchUrl(q)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-full border bg-background/70 px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-brand/40 hover:bg-brand/5 transition-colors"
+                            >
+                              Search YouTube: {q}
+                            </a>
+                          ))}
+                          {youtubeMeta[i].channels.map((c: string, ci: number) => (
+                            <a
+                              key={`c-${ci}`}
+                              href={youtubeSearchUrl(c)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-full border bg-background/70 px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-brand/40 hover:bg-brand/5 transition-colors"
+                            >
+                              Channel: {c}
+                            </a>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
-                    )
-                  })()}
-                </div>
-              ))}
+                )
+              })}
 
               {sending && (
                 <div className="flex justify-start animate-in fade-in duration-150">
@@ -345,37 +390,37 @@ export function TaskChat({
               )}
             </div>
           )}
+
+          {/* Spacer so floating input doesn't overlap last message */}
+          <div className="h-24" />
         </div>
       </div>
 
-      {/* Input */}
-      <div className="shrink-0 border-t border-border/60 bg-background/95 backdrop-blur-sm">
-        <div className="max-w-lg mx-auto px-4 py-3">
-          <div className="flex gap-2 items-end">
-            <textarea
-              ref={inputRef}
-              rows={1}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value)
-                // Auto-resize
-                e.target.style.height = "auto"
-                e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask about this task…"
-              disabled={sending || loadingHistory}
-              className="flex-1 resize-none rounded-2xl border bg-card px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40 transition-all placeholder:text-muted-foreground/60 disabled:opacity-50 leading-relaxed"
-              style={{ minHeight: "42px", maxHeight: "120px", overflowY: "auto" }}
-            />
-            <button
-              onClick={() => sendMessage(input)}
-              disabled={!input.trim() || sending || loadingHistory}
-              className="h-[42px] w-[42px] shrink-0 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:opacity-80 transition-opacity disabled:opacity-30 disabled:pointer-events-none"
-            >
-              <Send className="h-4 w-4" />
-            </button>
-          </div>
+      {/* ── Floating input ── */}
+      <div className={`shrink-0 px-4 pb-5 pt-2 ${isDesktopSideView ? 'max-w-3xl mx-auto w-full' : 'max-w-lg mx-auto w-full'}`}>
+        <div className="flex gap-2 items-center bg-card border border-border/80 shadow-lg shadow-black/5 rounded-3xl px-4 py-2 focus-within:border-ring/40 focus-within:ring-2 focus-within:ring-ring/20 transition-all duration-200">
+          <textarea
+            ref={inputRef}
+            rows={1}
+            value={input}
+            onChange={(e) => {
+              setInput(e.target.value)
+              e.target.style.height = "auto"
+              e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask about this task…"
+            disabled={sending || loadingHistory}
+            className="flex-1 resize-none bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 leading-relaxed py-1"
+            style={{ minHeight: "24px", maxHeight: "120px", overflowY: "auto" }}
+          />
+          <button
+            onClick={() => sendMessage(input)}
+            disabled={!input.trim() || sending || loadingHistory}
+            className="shrink-0 h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:opacity-80 transition-opacity disabled:opacity-30 disabled:pointer-events-none shadow-sm"
+          >
+            <Send className="h-3.5 w-3.5" />
+          </button>
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { ChevronDown, CheckCircle2 } from "lucide-react"
 import type { Phase } from "@/services/goals"
 import { TaskItem } from "./TaskItem"
@@ -11,6 +11,7 @@ interface PhaseCardProps {
   onTaskToggle: (phaseIndex: number, taskIndex: number, completed: boolean) => void
   onOpenGuide: (phaseIndex: number, taskIndex: number) => void
   loading?: boolean
+  activeTaskIndex?: number
 }
 
 export function PhaseCard({
@@ -21,8 +22,16 @@ export function PhaseCard({
   onTaskToggle,
   onOpenGuide,
   loading,
+  activeTaskIndex,
 }: PhaseCardProps) {
-  const [isOpen, setIsOpen] = useState(phaseIndex === 0)
+  const [isOpen, setIsOpen] = useState(phaseIndex === 0 || activeTaskIndex !== undefined)
+
+  // Update isOpen if activeTaskIndex changes to this phase
+  useEffect(() => {
+    if (activeTaskIndex !== undefined) {
+      setIsOpen(true)
+    }
+  }, [activeTaskIndex])
 
   const total = phase.tasks.length
   const done = phase.tasks.filter((t) => t.completed).length
@@ -99,6 +108,7 @@ export function PhaseCard({
               onToggle={onTaskToggle}
               onOpenGuide={onOpenGuide}
               loading={loading}
+              isActive={activeTaskIndex === taskIndex}
             />
           ))}
         </div>
