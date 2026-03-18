@@ -189,75 +189,77 @@ User profile for this conversation:
 
   // ── Chat screen ────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-[calc(100svh-3.5rem)]">
-      {/* Back nav */}
-      <div className="shrink-0 px-4 pt-5 pb-1">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors -ml-1"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back
-        </button>
-      </div>
-
-      {/* Message thread */}
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto px-4 py-4 space-y-3"
-      >
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-1 duration-200`}
+    <div className="flex flex-col h-[calc(100svh-3.5rem)] w-full">
+      <div className="flex-1 min-h-0 w-full max-w-2xl mx-auto flex flex-col">
+        {/* Back nav */}
+        <div className="shrink-0 px-4 pt-5 pb-1">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors -ml-1"
           >
-            {msg.role === "assistant" && (
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </button>
+        </div>
+
+        {/* Message thread */}
+        <div
+          ref={scrollRef}
+          className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3"
+        >
+          {messages.map((msg, i) => (
+            <div
+              key={i}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-1 duration-200`}
+            >
+              {msg.role === "assistant" && (
+                <div className="h-6 w-6 rounded-full bg-brand/15 flex items-center justify-center mr-2 mt-1 shrink-0">
+                  <Sparkles className="h-3 w-3 text-brand" />
+                </div>
+              )}
+              {(() => {
+                const isRtl = /[\u0600-\u06FF]/.test(msg.content)
+                return (
+                  <div
+                    dir={isRtl ? "rtl" : "ltr"}
+                    className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                      msg.role === "user"
+                        ? "bg-primary text-primary-foreground rounded-br-sm"
+                        : "bg-muted text-foreground rounded-bl-sm"
+                    } ${isRtl ? "text-right" : ""}`}
+                  >
+                    {msg.role === "assistant" ? (
+                      <Markdown content={msg.content} className={isRtl ? "text-right" : undefined} />
+                    ) : (
+                      <span className="whitespace-pre-wrap">{msg.content}</span>
+                    )}
+                  </div>
+                )
+              })()}
+            </div>
+          ))}
+
+          {/* Typing indicator */}
+          {sending && (
+            <div className="flex justify-start animate-in fade-in duration-150">
               <div className="h-6 w-6 rounded-full bg-brand/15 flex items-center justify-center mr-2 mt-1 shrink-0">
                 <Sparkles className="h-3 w-3 text-brand" />
               </div>
-            )}
-            {(() => {
-              const isRtl = /[\u0600-\u06FF]/.test(msg.content)
-              return (
-            <div
-              dir={isRtl ? "rtl" : "ltr"}
-              className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
-                msg.role === "user"
-                  ? "bg-primary text-primary-foreground rounded-br-sm"
-                  : "bg-muted text-foreground rounded-bl-sm"
-              } ${isRtl ? "text-right" : ""}`}
-            >
-              {msg.role === "assistant" ? (
-                <Markdown content={msg.content} className={isRtl ? "text-right" : undefined} />
-              ) : (
-                <span className="whitespace-pre-wrap">{msg.content}</span>
-              )}
-            </div>
-              )
-            })()}
-          </div>
-        ))}
-
-        {/* Typing indicator */}
-        {sending && (
-          <div className="flex justify-start animate-in fade-in duration-150">
-            <div className="h-6 w-6 rounded-full bg-brand/15 flex items-center justify-center mr-2 mt-1 shrink-0">
-              <Sparkles className="h-3 w-3 text-brand" />
-            </div>
-            <div className="rounded-2xl rounded-bl-sm bg-muted px-4 py-3">
-              <div className="flex gap-1.5 items-center">
-                <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:-0.3s]" />
-                <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:-0.15s]" />
-                <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce" />
+              <div className="rounded-2xl rounded-bl-sm bg-muted px-4 py-3">
+                <div className="flex gap-1.5 items-center">
+                  <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:-0.3s]" />
+                  <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:-0.15s]" />
+                  <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce" />
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Plan-ready banner — appears when AI signals it has enough context */}
       {planReady && (
-        <div className="shrink-0 mx-4 mb-3">
+        <div className="shrink-0 w-full max-w-2xl mx-auto px-4 mb-3">
           <div className="rounded-2xl bg-brand/8 border border-brand/20 px-4 py-3.5 flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-bold leading-snug">Ready to build your plan</p>
@@ -282,7 +284,7 @@ User profile for this conversation:
 
       {/* Input bar */}
       <div className="shrink-0 border-t border-border/60 bg-background px-4 py-3">
-        <div className="flex gap-2 items-end">
+        <div className="w-full max-w-2xl mx-auto flex gap-2 items-end">
           <textarea
             ref={inputRef}
             rows={1}

@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as NewGoalRouteImport } from './routes/new-goal'
+import { Route as GoalsRouteImport } from './routes/goals'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PlanGoalIdRouteImport } from './routes/plan.$goalId'
 
 const NewGoalRoute = NewGoalRouteImport.update({
   id: '/new-goal',
   path: '/new-goal',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GoalsRoute = GoalsRouteImport.update({
+  id: '/goals',
+  path: '/goals',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -31,30 +37,34 @@ const PlanGoalIdRoute = PlanGoalIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/goals': typeof GoalsRoute
   '/new-goal': typeof NewGoalRoute
   '/plan/$goalId': typeof PlanGoalIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/goals': typeof GoalsRoute
   '/new-goal': typeof NewGoalRoute
   '/plan/$goalId': typeof PlanGoalIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/goals': typeof GoalsRoute
   '/new-goal': typeof NewGoalRoute
   '/plan/$goalId': typeof PlanGoalIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/new-goal' | '/plan/$goalId'
+  fullPaths: '/' | '/goals' | '/new-goal' | '/plan/$goalId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/new-goal' | '/plan/$goalId'
-  id: '__root__' | '/' | '/new-goal' | '/plan/$goalId'
+  to: '/' | '/goals' | '/new-goal' | '/plan/$goalId'
+  id: '__root__' | '/' | '/goals' | '/new-goal' | '/plan/$goalId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  GoalsRoute: typeof GoalsRoute
   NewGoalRoute: typeof NewGoalRoute
   PlanGoalIdRoute: typeof PlanGoalIdRoute
 }
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/new-goal'
       fullPath: '/new-goal'
       preLoaderRoute: typeof NewGoalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/goals': {
+      id: '/goals'
+      path: '/goals'
+      fullPath: '/goals'
+      preLoaderRoute: typeof GoalsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -87,6 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  GoalsRoute: GoalsRoute,
   NewGoalRoute: NewGoalRoute,
   PlanGoalIdRoute: PlanGoalIdRoute,
 }
