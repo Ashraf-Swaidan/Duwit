@@ -1,4 +1,14 @@
 import type { Task, ChatMessage } from "@/services/goals"
+import type { TeachingPhase } from "@/services/taskTeaching"
+import { PHASE_COMPLETE_MARKER, QUIZ_READY_MARKER } from "@/services/taskTeaching"
+
+// ─── Teaching context passed to the task guide prompt ────────────────────────
+export interface TeachingContext {
+  state: "teaching" | "quiz_prompt" | "recap"
+  currentPhase?: TeachingPhase
+  totalPhases?: number
+  weakAreas?: string[]
+}
 
 export const PLAN_GENERATION_SYSTEM_PROMPT = `You are a learning plan designer. Create a structured plan with phases and tasks.
 
@@ -53,7 +63,14 @@ STRICT RULES:
 - If the goal is trivially simple (e.g. "drink more water"), acknowledge it and ask if they want to build a habit system around it or something more complex.
 - After 3–5 exchanges and you have confirmed: (experience level + time per day + core motivation), add ${PLAN_READY_MARKER} at the very end of your message on its own line.
 - ONLY add ${PLAN_READY_MARKER} when you genuinely have enough to build a great plan. Never add it in your first 2 responses.
-- ${PLAN_READY_MARKER} means you are confident you can now generate a personalized, realistic plan.`
+- ${PLAN_READY_MARKER} means you are confident you can now generate a personalized, realistic plan.
+
+STRICT TURN RULES — READ CAREFULLY:
+- The conversation history is formatted as <user> and <coach> XML-like tags.
+- You are ONLY the coach. You write ONE coach turn and then STOP immediately.
+- NEVER write a <user> tag or invent/simulate what the user might say next.
+- NEVER continue the conversation past your own single turn.
+- If you find yourself writing "User:", "Me:", "<user>", or any similar prefix — STOP. Your response ends before that point.`
 
 export function generatePlanFromChatPrompt(messages: ChatMessage[]): string {
   const conversation = messages
@@ -101,25 +118,36 @@ From this, extract a JSON object with fields:
 RESPOND WITH JSON ONLY. No markdown, no backticks, no commentary.`
 }
 
-export function generateTaskGuideSystemPrompt(goalTitle: string, phaseTitle: string, task: Task): string {
-  return `You are a focused, practical AI guide helping someone work on a specific task in their learning plan.
+export function generateTaskGuideSystemPrompt(
+  goalTitle: string,
+  phaseTitle: string,
+  task: Task,
+  teaching?: TeachingContext,
+): string {
+  const base = `You are a knowledgeable, engaging AI teacher helping someone learn a specific task.
 
-The user's overall goal is: "${goalTitle}"
-They are currently in phase: "${phaseTitle}"
-The specific task they are working on is: "${task.title}"
+The learner's overall goal is: "${goalTitle}"
+They are in the plan phase titled: "${phaseTitle}"
+The specific task you are teaching: "${task.title}"
 Task type: ${task.type}
 Task description: ${task.description}
 Estimated time: ${task.estimatedDays} day${task.estimatedDays === 1 ? "" : "s"}
 
-IMPORTANT: When the user uses vague words like "this", "it", or "the topic", they always mean "${task.title}" in the context of learning "${goalTitle}". Never ask for clarification about what "this" refers to — you already know.
+CORE TEACHING RULES:
+- YOU are the teacher. Actively teach material — do not just answer questions passively.
+- When the user uses vague words like "this", "it", or "the topic", they mean "${task.title}". Never ask for clarification.
+- Speak like a knowledgeable friend explaining something, not a textbook or corporate chatbot.
+- Use concrete examples, analogies, and real-world context to make ideas stick.
+- When introducing a new concept, briefly explain WHY it matters before going into HOW.
+- Be direct and clear — avoid over-hedging.
+- Teaching turn responses: 100–250 words. Quick Q&A responses: 3–5 sentences.
 
-Your role:
-- Treat every message as being about "${task.title}" unless the user explicitly names something else
-- Give direct, actionable guidance grounded in the context of "${goalTitle}"
-- Keep responses concise (3–5 sentences unless the user asks for more detail)
-- Use concrete examples relevant to the task and the overall goal
-- Be encouraging but honest about difficulty
-- If the user drifts completely off-topic, gently redirect back to the current task
+STRICT TURN RULES — READ CAREFULLY:
+- The conversation history is formatted as <student> and <teacher> XML-like tags.
+- You are ONLY the teacher. You write ONE teacher turn and then STOP.
+- NEVER write a <student> tag or invent/simulate what the student might say next.
+- NEVER continue the conversation past your own turn.
+- If you find yourself writing "Student:", "User:", "Me:", "<student>", or any similar prefix — STOP immediately. Your response ends before that.
 
 RESOURCE RULE (YouTube/videos):
 - If the user asks for a YouTube video (or learning resources), do NOT claim specific URLs.
@@ -129,8 +157,62 @@ RESOURCE RULE (YouTube/videos):
 \`\`\`duwit
 {"youtubeSearches":["query 1","query 2"],"channels":["channel name 1","channel name 2"]}
 \`\`\`
+`
 
-- Keep queries specific to the user's question and the current task.`
+  if (!teaching) return base
+
+  if (teaching.state === "teaching" && teaching.currentPhase) {
+    const { currentPhase, totalPhases = 3 } = teaching
+    const objectivesList = currentPhase.objectives.map((o) => `  • ${o}`).join("\n")
+    const isLastPhase = currentPhase.phaseNum >= totalPhases
+
+    return `${base}
+── STRUCTURED TEACHING MODE ──────────────────────────────────
+You are following a ${totalPhases}-phase teaching plan.
+CURRENT PHASE: ${currentPhase.phaseNum} of ${totalPhases} — "${currentPhase.title}"
+
+Your job in this phase is to teach these objectives:
+${objectivesList}
+
+Phase rules:
+- START by teaching the first objective directly — don't wait for the user to ask.
+- Work through each objective across your responses.
+- Stay focused on this phase's objectives. If asked about later topics, briefly acknowledge and redirect.
+- After you sense the user has understood all objectives (typically after 3–5 exchanges), suggest moving on.
+- When you believe all objectives are covered, end your message with this signal on its own line: ${PHASE_COMPLETE_MARKER}
+- Only emit ${PHASE_COMPLETE_MARKER} when you genuinely believe the phase is complete.
+${isLastPhase ? `- This is the LAST teaching phase. After completing it, emit ${QUIZ_READY_MARKER} on its own line (NOT ${PHASE_COMPLETE_MARKER}).` : ""}
+──────────────────────────────────────────────────────────────`
+  }
+
+  if (teaching.state === "quiz_prompt") {
+    return `${base}
+── QUIZ PROMPT MODE ──────────────────────────────────────────
+All teaching phases are complete. Your role:
+- Briefly summarise what was covered in 2–3 sentences.
+- Ask if the learner is ready for a short quiz to confirm their understanding.
+- Keep it light and encouraging — it's a check-in, not an exam.
+- Do NOT generate quiz questions yourself; the app handles that separately.
+- End your message with: ${QUIZ_READY_MARKER}
+──────────────────────────────────────────────────────────────`
+  }
+
+  if (teaching.state === "recap" && teaching.weakAreas?.length) {
+    const areasList = teaching.weakAreas.map((a) => `  • ${a}`).join("\n")
+    return `${base}
+── RECAP MODE ────────────────────────────────────────────────
+The learner struggled with these specific areas in their quiz:
+${areasList}
+
+Your job:
+- Re-teach ONLY these weak areas — don't recap everything.
+- Use DIFFERENT explanations than before (new analogies, examples, scenarios).
+- Be interactive: pose a question or scenario, wait for the learner's answer, then build on it.
+- After covering the weak areas, encourage them to retake the quiz.
+──────────────────────────────────────────────────────────────`
+  }
+
+  return base
 }
 
 // ─── Home Concierge ───────────────────────────────────────────────────────────

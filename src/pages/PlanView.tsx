@@ -183,6 +183,9 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
               phaseTasks={goal.phases[activeChat.phaseIndex].tasks}
               onClose={() => setActiveChat(null)}
               isDesktopSideView={true}
+              onMarkComplete={() =>
+                handleTaskToggle(activeChat.phaseIndex, activeChat.taskIndex, true)
+              }
               onNavigateTask={(direction: number) => {
                 let nextPhaseIndex = activeChat.phaseIndex
                 let nextTaskIndex = activeChat.taskIndex + direction

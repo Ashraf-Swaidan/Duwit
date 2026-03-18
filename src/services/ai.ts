@@ -1,5 +1,7 @@
 import { getModelInstance, model as defaultModel } from "@/lib/firebase"
 
+export type StreamChunkCallback = (partial: string) => void
+
 export interface AICallOptions {
   prompt: string
   systemPrompt?: string
@@ -29,6 +31,43 @@ export async function callAI({
   const text = result.response.text()
   if (!text) throw new Error("No text in AI response")
   return text
+}
+
+/**
+ * Like callAI but streams the response token-by-token.
+ * Calls onChunk with each incremental text piece.
+ * Returns the full assembled text when done.
+ */
+export async function callAIStream({
+  prompt,
+  systemPrompt,
+  temperature = 0.7,
+  maxOutputTokens = 2000,
+  modelName,
+  onChunk,
+}: AICallOptions & { onChunk: StreamChunkCallback }): Promise<string> {
+  const activeModel = modelName ? getModelInstance(modelName) : defaultModel
+
+  const contents = systemPrompt
+    ? [{ role: "user" as const, parts: [{ text: systemPrompt + "\n\n" + prompt }] }]
+    : [{ role: "user" as const, parts: [{ text: prompt }] }]
+
+  const result = await activeModel.generateContentStream({
+    contents,
+    generationConfig: { temperature, maxOutputTokens },
+  })
+
+  let full = ""
+  for await (const chunk of result.stream) {
+    const piece = chunk.text()
+    if (piece) {
+      full += piece
+      onChunk(piece)
+    }
+  }
+
+  if (!full) throw new Error("No text in AI stream response")
+  return full
 }
 
 export async function callAIStructured<T = Record<string, unknown>>({

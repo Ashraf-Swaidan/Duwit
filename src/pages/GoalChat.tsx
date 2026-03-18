@@ -71,9 +71,16 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
     }
 
     try {
+      // XML-style tags prevent the model from pattern-matching into continuing
+      // both sides of the conversation.
       const history = updated
-        .map((m) => `${m.role === "user" ? "User" : "Coach"}: ${m.content}`)
-        .join("\n\n")
+        .map((m) =>
+          m.role === "user"
+            ? `<user>${m.content}</user>`
+            : `<coach>${m.content}</coach>`,
+        )
+        .join("\n")
+        + "\n<coach>"
 
       const systemPrompt =
         userProfile && (userProfile.nickname || userProfile.preferredLanguage || userProfile.preferredLearningStyle)
@@ -86,13 +93,21 @@ User profile for this conversation:
 - Tone preference: ${userProfile.preferredTone ?? "neutral"}`
           : GOAL_CHAT_SYSTEM_PROMPT
 
-      const raw = await callAI({
+      const rawFull = await callAI({
         prompt: history,
         systemPrompt,
         temperature: 0.8,
         maxOutputTokens: 350,
         modelName: selectedModel,
       })
+
+      // Strip the closing </coach> tag then cut off any hallucinated user turn
+      let raw = rawFull.replace(/<\/coach>[\s\S]*$/, "").trim()
+      const cutPatterns = [/<user>/i, /\nUser:/i, /\nMe:/i]
+      for (const pat of cutPatterns) {
+        const idx = raw.search(pat)
+        if (idx !== -1) raw = raw.slice(0, idx).trim()
+      }
 
       const isReady = raw.includes(PLAN_READY_MARKER)
       const content = raw.replaceAll(PLAN_READY_MARKER, "").trim()

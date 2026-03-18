@@ -11,7 +11,7 @@ import {
   saveCachedGreeting,
   type CachedGreeting,
 } from "@/services/userContext"
-import { callAI } from "@/services/ai"
+import { callAIStream } from "@/services/ai"
 import { HOME_CONCIERGE_SYSTEM_PROMPT, generateHomeConciergePrompt } from "@/services/prompts"
 import { Send, Sparkles } from 'lucide-react'
 import { Markdown } from "@/components/Markdown"
@@ -170,18 +170,34 @@ function HomePage() {
         .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
         .join('\n\n')
 
-      const aiResponse = await callAI({
+      // Add streaming placeholder
+      setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
+
+      let accumulated = ''
+      const aiResponse = await callAIStream({
         prompt: generateHomeConciergePrompt(goalData, conversation),
         systemPrompt: HOME_CONCIERGE_SYSTEM_PROMPT,
         temperature: 0.7,
         maxOutputTokens: 200,
+        onChunk: (piece) => {
+          accumulated += piece
+          const displayText = accumulated.replace(NAVIGATE_REGEX, '').trim()
+          setMessages((prev) => {
+            const updated = [...prev]
+            updated[updated.length - 1] = { role: 'assistant', content: displayText }
+            return updated
+          })
+        },
       })
 
-      // Check if AI wants to navigate (we'll ask user to confirm first)
+      // Final: extract nav signal and clean
       const navMatch = aiResponse.match(NAVIGATE_REGEX)
       const cleanResponse = aiResponse.replace(NAVIGATE_REGEX, '').trim()
-
-      setMessages((prev) => [...prev, { role: 'assistant', content: cleanResponse }])
+      setMessages((prev) => {
+        const updated = [...prev]
+        updated[updated.length - 1] = { role: 'assistant', content: cleanResponse }
+        return updated
+      })
 
       if (navMatch) {
         const goalId = navMatch[1]
@@ -221,37 +237,40 @@ function HomePage() {
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1 duration-200`}
             >
               {msg.role === 'assistant' && (
-                <div className="h-8 w-8 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mr-2.5 mt-0.5">
+                <div className="h-8 w-8 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mr-3 mt-0.5">
                   <Sparkles className="h-3.5 w-3.5 text-brand" />
                 </div>
               )}
               {msg.role === 'assistant' ? (
+                /* AI: no bubble, full-width comfortable reading */
                 <div
-                  className="rounded-3xl px-4 py-3 max-w-[82%] text-sm leading-relaxed whitespace-pre-wrap bg-muted rounded-bl-lg"
+                  className="flex-1 text-sm leading-7 text-foreground py-0.5"
                   style={{ wordBreak: 'break-word' }}
                 >
                   <Markdown content={msg.content} />
                 </div>
               ) : (
+                /* User: fully rounded pill */
                 <div
-                  className="rounded-3xl px-4 py-3 max-w-[82%] text-sm leading-relaxed whitespace-pre-wrap bg-brand text-white rounded-br-lg"
+                  className="rounded-full px-4 py-2.5 max-w-[82%] text-sm leading-relaxed bg-brand text-white"
                   style={{ wordBreak: 'break-word' }}
                 >
-                  {msg.content}
+                  <span className="whitespace-pre-wrap">{msg.content}</span>
                 </div>
               )}
             </div>
           ))}
 
-          {isThinking && (
-            <div className="flex justify-start">
-              <div className="h-8 w-8 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mr-2.5 mt-0.5">
+          {/* Typing dots only shown before the first chunk arrives */}
+          {isThinking && messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content === '' && (
+            <div className="flex justify-start items-center gap-2.5">
+              <div className="h-8 w-8 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0">
                 <Sparkles className="h-3.5 w-3.5 text-brand" />
               </div>
-              <div className="rounded-3xl rounded-bl-lg bg-muted px-4 py-3 flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:-0.3s]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:-0.15s]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce" />
+              <div className="flex items-center gap-1.5 py-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.3s]" />
+                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.15s]" />
+                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce" />
               </div>
             </div>
           )}
