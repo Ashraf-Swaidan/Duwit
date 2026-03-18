@@ -14,6 +14,8 @@ import {
 import { callAI } from "@/services/ai"
 import { HOME_CONCIERGE_SYSTEM_PROMPT, generateHomeConciergePrompt } from "@/services/prompts"
 import { Send, Sparkles } from 'lucide-react'
+import { Markdown } from "@/components/Markdown"
+import { loadHomeChat, saveHomeChat, clearHomeChat } from "@/services/homeChatStore"
 
 export const Route = createFileRoute('/')(({
   component: HomePage,
@@ -31,7 +33,7 @@ function HomePage() {
   const navigate = useNavigate()
   const firstName = user?.displayName?.split(' ')[0] || user?.email?.split('@')[0] || 'there'
 
-  const { data: goals = [] } = useQuery({
+  const { data: goals = [], isPending: goalsLoading } = useQuery({
     queryKey: ['goals', user?.uid],
     queryFn: () => (user ? getUserGoals(user.uid) : Promise.resolve([])),
     enabled: !!user,
@@ -41,13 +43,30 @@ function HomePage() {
   const [input, setInput] = useState('')
   const [isThinking, setIsThinking] = useState(false)
   const [greetingReady, setGreetingReady] = useState(false)
-  const greetingSeedRef = useRef<string | null>(null)
+  const [pendingNavGoalId, setPendingNavGoalId] = useState<string | null>(null)
+  const [isNavigatingGoal, setIsNavigatingGoal] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  // ─── Boot: show greeting on goals load ───────────────────────────────────
+  // ─── Boot: hydrate or show greeting on goals load ─────────────────────────
   useEffect(() => {
-    if (goals.length === 0 && !greetingReady) {
+    if (greetingReady || goalsLoading) return
+
+    // 0) Try to hydrate recent chat from in-memory store (soft session memory)
+    const cached = loadHomeChat()
+    const STALE_MS = 30 * 60 * 1000 // 30 minutes
+    const isFresh = cached.lastUpdated && Date.now() - cached.lastUpdated < STALE_MS
+
+    if (cached.messages.length > 0 && isFresh) {
+      setMessages(cached.messages)
+      setPendingNavGoalId(cached.pendingNavGoalId)
+      setGreetingReady(true)
+      return
+    } else if (cached.messages.length > 0 && !isFresh) {
+      clearHomeChat()
+    }
+
+    if (goals.length === 0) {
       // For users with no goals, show a generic welcome immediately
       setMessages([{
         role: 'assistant',
@@ -57,17 +76,16 @@ function HomePage() {
       return
     }
 
-    if (goals.length > 0 && !greetingReady) {
+    if (goals.length > 0) {
       initGreeting()
     }
-  }, [goals, greetingReady]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [goals, goalsLoading, greetingReady]) // eslint-disable-line react-hooks-exhaustive-deps
 
   async function initGreeting() {
     setGreetingReady(true)
 
     // 1. Show instant template greeting right away
     const instant = buildInstantGreeting(firstName, goals)
-    greetingSeedRef.current = instant
     setMessages([{ role: 'assistant', content: instant }])
 
     if (!user) return
@@ -80,15 +98,10 @@ function HomePage() {
     } catch (_) { /* network error, continue */ }
 
     if (cached && cached.contextHash === hash) {
-      // Cache still valid — swap in the AI greeting
+      // Cache still valid and fresh – keep it for next session, but
+      // do NOT mutate the already shown greeting in this view.
       const twelveHoursMs = 12 * 60 * 60 * 1000
       if (Date.now() - new Date(cached.generatedAt).getTime() < twelveHoursMs) {
-        setMessages((prev) => {
-          if (prev.length !== 1) return prev
-          if (prev[0]?.role !== 'assistant') return prev
-          if (greetingSeedRef.current && prev[0].content !== greetingSeedRef.current) return prev
-          return [{ role: 'assistant', content: cached.message }]
-        })
         return
       }
     }
@@ -110,12 +123,6 @@ function HomePage() {
       })
 
       const cleanGreeting = aiGreeting.replace(NAVIGATE_REGEX, '').trim()
-      setMessages((prev) => {
-        if (prev.length !== 1) return prev
-        if (prev[0]?.role !== 'assistant') return prev
-        if (greetingSeedRef.current && prev[0].content !== greetingSeedRef.current) return prev
-        return [{ role: 'assistant', content: cleanGreeting }]
-      })
 
       // Save to cache
       const newCache: CachedGreeting = {
@@ -134,6 +141,13 @@ function HomePage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isThinking])
 
+  // ─── Keep in-memory store in sync ─────────────────────────────────────────
+  useEffect(() => {
+    // Don't overwrite any existing snapshot with an empty one
+    if (messages.length === 0 && !pendingNavGoalId) return
+    saveHomeChat(messages, pendingNavGoalId)
+  }, [messages, pendingNavGoalId])
+
   // ─── Send a message ───────────────────────────────────────────────────────
   async function handleSend() {
     const trimmed = input.trim()
@@ -141,7 +155,8 @@ function HomePage() {
 
     setInput('')
     const userMessage: Message = { role: 'user', content: trimmed }
-    setMessages((prev) => [...prev, userMessage])
+    const nextMessages: Message[] = [...messages, userMessage]
+    setMessages(nextMessages)
     setIsThinking(true)
 
     try {
@@ -151,14 +166,18 @@ function HomePage() {
         progress: g.progress ?? 0,
       }))
 
+      const conversation = nextMessages
+        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+        .join('\n\n')
+
       const aiResponse = await callAI({
-        prompt: generateHomeConciergePrompt(goalData, trimmed),
+        prompt: generateHomeConciergePrompt(goalData, conversation),
         systemPrompt: HOME_CONCIERGE_SYSTEM_PROMPT,
         temperature: 0.7,
         maxOutputTokens: 200,
       })
 
-      // Check if AI wants to navigate
+      // Check if AI wants to navigate (we'll ask user to confirm first)
       const navMatch = aiResponse.match(NAVIGATE_REGEX)
       const cleanResponse = aiResponse.replace(NAVIGATE_REGEX, '').trim()
 
@@ -166,9 +185,7 @@ function HomePage() {
 
       if (navMatch) {
         const goalId = navMatch[1]
-        setTimeout(() => {
-          navigate({ to: '/plan/$goalId', params: { goalId } })
-        }, 900)
+        setPendingNavGoalId(goalId)
       }
     } catch (e) {
       setMessages((prev) => [
@@ -188,6 +205,9 @@ function HomePage() {
   }
 
   const suggestions = buildGoalSuggestions(goals)
+  const pendingGoal = pendingNavGoalId
+    ? goals.find((g) => g.id === pendingNavGoalId) ?? null
+    : null
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
@@ -198,23 +218,28 @@ function HomePage() {
           {messages.map((msg, i) => (
             <div
               key={i}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1 duration-200`}
             >
               {msg.role === 'assistant' && (
                 <div className="h-8 w-8 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mr-2.5 mt-0.5">
                   <Sparkles className="h-3.5 w-3.5 text-brand" />
                 </div>
               )}
-              <div
-                className={`rounded-3xl px-4 py-3 max-w-[82%] text-sm leading-relaxed whitespace-pre-wrap ${
-                  msg.role === 'user'
-                    ? 'bg-brand text-white rounded-br-lg'
-                    : 'bg-muted rounded-bl-lg'
-                }`}
-                style={{ wordBreak: 'break-word' }}
-              >
-                {msg.content}
-              </div>
+              {msg.role === 'assistant' ? (
+                <div
+                  className="rounded-3xl px-4 py-3 max-w-[82%] text-sm leading-relaxed whitespace-pre-wrap bg-muted rounded-bl-lg"
+                  style={{ wordBreak: 'break-word' }}
+                >
+                  <Markdown content={msg.content} />
+                </div>
+              ) : (
+                <div
+                  className="rounded-3xl px-4 py-3 max-w-[82%] text-sm leading-relaxed whitespace-pre-wrap bg-brand text-white rounded-br-lg"
+                  style={{ wordBreak: 'break-word' }}
+                >
+                  {msg.content}
+                </div>
+              )}
             </div>
           ))}
 
@@ -249,6 +274,67 @@ function HomePage() {
                 <span className="text-muted-foreground shrink-0">{s.progress}%</span>
               </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Pending navigation confirmation */}
+      {pendingGoal && (
+        <div className="px-4 pb-3">
+          <div className="max-w-2xl mx-auto">
+            <div className="rounded-2xl border border-border/70 bg-card/95 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 animate-in fade-in slide-in-from-bottom-1 duration-200">
+              <div>
+                {isNavigatingGoal ? (
+                  <>
+                    <p className="text-sm font-semibold">
+                      Opening “{pendingGoal.title}”…
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Loading your plan. This will just take a moment.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-semibold">
+                      Continue with “{pendingGoal.title}”?
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      I can open its plan so you can jump back into it.
+                    </p>
+                  </>
+                )}
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isNavigatingGoal) return
+                    setPendingNavGoalId(null)
+                  }}
+                  className="h-8 px-3 rounded-xl text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                  disabled={isNavigatingGoal}
+                >
+                  Not now
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!pendingGoal?.id || isNavigatingGoal) return
+                    setIsNavigatingGoal(true)
+                    const goalId = pendingGoal.id
+                    setTimeout(() => {
+                      setPendingNavGoalId(null)
+                      setIsNavigatingGoal(false)
+                      navigate({ to: '/plan/$goalId', params: { goalId } })
+                    }, 1500)
+                  }}
+                  className="h-8 px-3 rounded-xl text-xs font-semibold bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-60"
+                  disabled={isNavigatingGoal}
+                >
+                  {isNavigatingGoal ? 'Opening…' : 'Open plan'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
