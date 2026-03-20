@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { AuthForm } from "@/components/AuthForm"
 import { auth } from "@/lib/firebase"
 import { useAuth } from "@/hooks/useAuth"
-import { useModel, AVAILABLE_MODELS, type ModelId } from "@/contexts/ModelContext"
+import { useModel, MODEL_GROUPS, type ModelId } from "@/contexts/ModelContext"
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -48,21 +48,21 @@ function RootComponent() {
             Duwit
           </Link>
 
-          {/* Desktop tabs */}
+          {/* Home / Goals — top bar on all breakpoints (no separate mobile bottom nav) */}
           {user && !authLoading && isTabRoute && (
-            <div className="hidden md:flex flex-1 justify-center">
-              <div className="flex items-center gap-7">
+            <div className="flex flex-1 justify-center min-w-0">
+              <div className="flex items-center gap-4 sm:gap-7">
                 {tabs.map(({ to, icon: Icon, label }) => {
                   const isActive = currentPath === to
                   return (
                     <button
                       key={to}
                       onClick={() => navigate({ to })}
-                      className={`relative flex items-center gap-2 text-sm font-semibold transition-colors py-1 ${
+                      className={`relative flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm font-semibold transition-colors py-1 shrink-0 ${
                         isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
-                      <Icon className="h-4 w-4" />
+                      <Icon className="h-4 w-4 shrink-0" />
                       <span>{label}</span>
                       <span
                         className={`absolute -bottom-[14px] left-0 right-0 h-0.5 rounded-full transition-opacity ${
@@ -91,11 +91,7 @@ function RootComponent() {
       </header>
 
       {/* Main content area — fills remaining height */}
-      <main
-        className={`flex-1 w-full min-h-0 flex flex-col ${
-          user && !authLoading && isTabRoute ? 'pb-16 md:pb-0' : ''
-        }`}
-      >
+      <main className="flex-1 w-full min-h-0 flex flex-col">
         {authLoading ? (
           <div className="flex h-[60vh] flex-col items-center justify-center gap-6 animate-in zoom-in-95 fade-in duration-500">
             <div className="flex flex-col items-center">
@@ -120,31 +116,6 @@ function RootComponent() {
           </div>
         )}
       </main>
-
-      {/* Bottom tab navigation */}
-      {user && !authLoading && isTabRoute && (
-        <nav className="fixed bottom-0 left-0 right-0 z-40 bg-background/90 backdrop-blur-md border-t border-border/60 h-16 md:hidden">
-          <div className="max-w-md mx-auto h-full flex items-center justify-around px-6">
-            {tabs.map(({ to, icon: Icon, label }) => {
-              const isActive = currentPath === to
-              return (
-                <button
-                  key={to}
-                  onClick={() => navigate({ to })}
-                  className={`flex flex-col items-center gap-1 px-6 py-1 rounded-2xl transition-all duration-150 ${
-                    isActive ? 'text-brand' : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  <Icon className={`h-5 w-5 transition-transform duration-150 ${isActive ? 'scale-110' : ''}`} />
-                  <span className={`text-[10px] font-semibold tracking-wide ${isActive ? 'opacity-100' : 'opacity-70'}`}>
-                    {label}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-        </nav>
-      )}
 
       {/* Settings drawer — backdrop */}
       {settingsOpen && (
@@ -175,31 +146,40 @@ function RootComponent() {
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-7">
           {/* Model picker */}
           <div className="space-y-3">
-            <div className="flex itccems-center gap-2">
+            <div className="flex items-center gap-2">
               <Cpu className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm font-semibold">AI Model</span>
             </div>
-            <div className="space-y-2">
-              {AVAILABLE_MODELS.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => setSelectedModel(m.id as ModelId)}
-                  className={`w-full text-left rounded-2xl border p-3.5 transition-all duration-150 ${
-                    selectedModel === m.id
-                      ? "border-primary bg-primary/5 shadow-sm"
-                      : "border-border hover:border-primary/40 hover:bg-muted/40"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-semibold">{m.name}</span>
-                    {selectedModel === m.id && (
-                      <div className="h-5 w-5 rounded-full bg-primary flex items-center justify-center">
-                        <Check className="h-3 w-3 text-primary-foreground" />
-                      </div>
-                    )}
+            <div className="space-y-4">
+              {MODEL_GROUPS.map((group) => (
+                <div key={group.label} className="space-y-1.5">
+                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-1">
+                    {group.label}
+                  </p>
+                  <div className="space-y-1.5">
+                    {group.models.map((m) => (
+                      <button
+                        key={m.id}
+                        onClick={() => setSelectedModel(m.id as ModelId)}
+                        className={`w-full text-left rounded-2xl border p-3 transition-all duration-150 ${
+                          selectedModel === m.id
+                            ? "border-primary bg-primary/5 shadow-sm"
+                            : "border-border hover:border-primary/40 hover:bg-muted/40"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-semibold">{m.name}</span>
+                          {selectedModel === m.id && (
+                            <div className="shrink-0 h-4 w-4 rounded-full bg-primary flex items-center justify-center">
+                              <Check className="h-2.5 w-2.5 text-primary-foreground" />
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">{m.description}</p>
+                      </button>
+                    ))}
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{m.description}</p>
-                </button>
+                </div>
               ))}
             </div>
           </div>

@@ -5,6 +5,7 @@ import { auth } from "@/lib/firebase"
 import { callAIStructured } from "@/services/ai"
 import { generatePlanPrompt, PLAN_GENERATION_SYSTEM_PROMPT } from "@/services/prompts"
 import { createGoal, type Goal } from "@/services/goals"
+import { expandCurriculumForPlan } from "@/services/curriculumExpansion"
 import { useModel } from "@/contexts/ModelContext"
 
 interface NewGoalProps {
@@ -27,6 +28,8 @@ export function NewGoal({ onSuccess, onBack }: NewGoalProps) {
   const [goal, setGoal] = useState("")
   const [timePerDay, setTimePerDay] = useState("30 minutes")
   const [loading, setLoading] = useState(false)
+  const [planStage, setPlanStage] = useState<"outline" | "lessons" | null>(null)
+  const [lessonProgress, setLessonProgress] = useState({ done: 0, total: 0 })
   const [error, setError] = useState<string | null>(null)
 
   async function handleGenerate() {
@@ -40,8 +43,10 @@ export function NewGoal({ onSuccess, onBack }: NewGoalProps) {
     }
 
     setLoading(true)
+    setPlanStage("outline")
     setError(null)
 
+    let stage: "outline" | "lessons" = "outline"
     try {
       const prompt = generatePlanPrompt(goal, timePerDay)
       const plan = await callAIStructured<Omit<Goal, "id" | "uid" | "status" | "createdAt" | "progress">>({
@@ -52,14 +57,28 @@ export function NewGoal({ onSuccess, onBack }: NewGoalProps) {
         modelName: selectedModel,
       })
 
-      const goalId = await createGoal(user.uid, plan as Goal)
+      const skeleton = plan as Goal
+      stage = "lessons"
+      setPlanStage("lessons")
+      const expanded = await expandCurriculumForPlan(skeleton, selectedModel, (done, total) => {
+        setLessonProgress({ done, total })
+      })
+
+      const goalId = await createGoal(user.uid, expanded)
       onSuccess?.(goalId)
       setGoal("")
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to generate plan. Please try again.")
+      setError(
+        stage === "lessons"
+          ? "Couldn't generate lessons for one part of your plan. Try again or shorten the goal."
+          : e instanceof Error
+            ? e.message
+            : "Failed to generate plan. Please try again.",
+      )
       console.error("Plan generation error:", e)
     } finally {
       setLoading(false)
+      setPlanStage(null)
     }
   }
 
@@ -139,7 +158,9 @@ export function NewGoal({ onSuccess, onBack }: NewGoalProps) {
                 <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce [animation-delay:-0.15s]" />
                 <span className="h-1.5 w-1.5 rounded-full bg-current animate-bounce" />
               </div>
-              Building your plan…
+              {planStage === "lessons" && lessonProgress.total > 0
+                ? `Detailing lessons (${lessonProgress.done}/${lessonProgress.total})…`
+                : "Outlining roadmap…"}
             </>
           ) : (
             <>

@@ -1,14 +1,18 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import type { Task, ChatMessage } from "@/services/goals"
+import { validateLessonStepsForTask } from "@/services/curriculumValidation"
 import {
   type TeachingState,
   type TeachingPhase,
   type QuizQuestion,
   type QuizAnswer,
   type QuizResult,
+  type TaskTeachingPersistV1,
+  buildTaskTeachingPersistV1,
   generateTeachingPlan,
   generateAdaptiveQuiz,
   scoreQuiz,
+  TASK_COMPLETE_SUGGEST_MARKER,
 } from "@/services/taskTeaching"
 import type { TeachingContext } from "@/services/prompts"
 
@@ -18,12 +22,18 @@ interface UseTaskTeachingOptions {
   phaseTitle: string
   messages: ChatMessage[]
   selectedModel?: string
-  /**
-   * Set to true once history loading is complete AND there were no saved
-   * messages. The hook watches this and runs plan generation on the first
-   * true transition.
-   */
-  isNewChat: boolean
+  /** True after Firestore load (or empty) has finished */
+  historyReady: boolean
+  /** Snapshot from Firestore; null if missing or invalid */
+  persistedTeaching: TaskTeachingPersistV1 | null
+  /** Current message count — used only at bootstrap (guarded by bootstrappedRef) */
+  messagesLength: number
+  /** Increment to wipe teaching state and re-bootstrap (e.g. clear chat) */
+  sessionKey: number
+  /** Stable id for this task chat (e.g. goalId-phaseIndex-taskIndex) */
+  taskScopeKey: string
+  /** Titles of other tasks in the same plan phase — excluded from micro-curriculum focus */
+  siblingTaskTitles?: string[]
 }
 
 export interface UseTaskTeachingReturn {
@@ -35,22 +45,34 @@ export interface UseTaskTeachingReturn {
   totalPhases: number
   /** Show the "Ready to move on?" card */
   showAdvanceCard: boolean
+  /** Model suggested marking the whole task done */
+  offerTaskCompleteSuggest: boolean
   quizQuestions: QuizQuestion[]
   currentQuizIndex: number
   quizAnswers: QuizAnswer[]
   quizResult: QuizResult | null
   generatingQuiz: boolean
   planError: boolean
-  /** Context object to pass to generateTaskGuideSystemPrompt */
+  /** Context object that TaskChat passes to the system prompt generator */
   teachingContext: TeachingContext | undefined
-  // Actions
+  dismissTaskCompleteSuggest: () => void
   handleAIMarkers: (rawResponse: string) => string
   advancePhase: () => void
+  advancePhaseAndGetContinuePrompt: () => string
   stayInPhase: () => void
   startQuiz: () => Promise<void>
   answerQuizQuestion: (answerIndex: number) => void
   retakeQuiz: () => Promise<void>
   startRecap: () => void
+  /** Build payload for Firestore */
+  getTeachingPersist: (
+    checklistSelections?: Record<string, number[]>,
+  ) => TaskTeachingPersistV1 | null
+}
+
+function coerceTeachingState(s: TeachingState | null): TeachingState | null {
+  if (s === "loading") return "teaching"
+  return s
 }
 
 export function useTaskTeaching({
@@ -59,50 +81,212 @@ export function useTaskTeaching({
   phaseTitle,
   messages,
   selectedModel,
-  isNewChat,
+  historyReady,
+  persistedTeaching,
+  messagesLength,
+  sessionKey,
+  taskScopeKey,
+  siblingTaskTitles,
 }: UseTaskTeachingOptions): UseTaskTeachingReturn {
-  // Start as null; will be set to "loading" when isNewChat first triggers
   const [teachingState, setTeachingState] = useState<TeachingState | null>(null)
   const [phases, setPhases] = useState<TeachingPhase[]>([])
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(0)
   const [showAdvanceCard, setShowAdvanceCard] = useState(false)
+  const [offerTaskCompleteSuggest, setOfferTaskCompleteSuggest] = useState(false)
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([])
   const [currentQuizIndex, setCurrentQuizIndex] = useState(0)
   const [quizAnswers, setQuizAnswers] = useState<QuizAnswer[]>([])
   const [quizResult, setQuizResult] = useState<QuizResult | null>(null)
   const [generatingQuiz, setGeneratingQuiz] = useState(false)
   const [planError, setPlanError] = useState(false)
-  const initializedRef = useRef(false)
 
-  // Generate teaching plan once, triggered when isNewChat first becomes true
+  const bootstrappedRef = useRef(false)
+  const phaseIndexRef = useRef(0)
+
+  const lessonStepsFingerprint = useMemo(
+    () => (task.lessonSteps?.length ? JSON.stringify(task.lessonSteps) : ""),
+    [task.lessonSteps],
+  )
+
   useEffect(() => {
-    if (!isNewChat || initializedRef.current) return
-    initializedRef.current = true
-    setTeachingState("loading")
+    phaseIndexRef.current = currentPhaseIndex
+  }, [currentPhaseIndex])
 
-    generateTeachingPlan(goalTitle, phaseTitle, task, selectedModel)
+  // Reset all local teaching state when session or task scope changes
+  useEffect(() => {
+    bootstrappedRef.current = false
+    setTeachingState(null)
+    setPhases([])
+    setCurrentPhaseIndex(0)
+    phaseIndexRef.current = 0
+    setShowAdvanceCard(false)
+    setOfferTaskCompleteSuggest(false)
+    setQuizQuestions([])
+    setCurrentQuizIndex(0)
+    setQuizAnswers([])
+    setQuizResult(null)
+    setGeneratingQuiz(false)
+    setPlanError(false)
+  }, [sessionKey, taskScopeKey])
+
+  /**
+   * Bootstrap teaching state:
+   * - If task.lessonSteps validates: canonical curriculum from goal; compare to teachingPersist
+   *   (titles + lengths + phaseNum). Mismatch → reset phases from goal, index 0, clear quiz.
+   * - Else legacy: hydrate persist or generateTeachingPlan.
+   */
+  useEffect(() => {
+    if (!historyReady || bootstrappedRef.current) return
+    bootstrappedRef.current = true
+
+    const p = persistedTeaching
+    const goalBacked =
+      !!task.lessonSteps?.length &&
+      validateLessonStepsForTask(task, "task").length === 0
+
+    if (goalBacked && task.lessonSteps) {
+      const G = task.lessonSteps as TeachingPhase[]
+      const P = p?.v === 1 && Array.isArray(p.phases) ? p.phases : []
+
+      const structureOk =
+        P.length === G.length &&
+        G.every((g, i) => {
+          const pp = P[i]
+          if (!pp) return false
+          return (
+            (pp.title ?? "").trim() === (g.title ?? "").trim() &&
+            pp.phaseNum === i + 1 &&
+            g.phaseNum === i + 1
+          )
+        })
+
+      if (!structureOk) {
+        setPhases(G)
+        setCurrentPhaseIndex(0)
+        phaseIndexRef.current = 0
+        setTeachingState("teaching")
+        setShowAdvanceCard(false)
+        setOfferTaskCompleteSuggest(false)
+        setQuizQuestions([])
+        setCurrentQuizIndex(0)
+        setQuizAnswers([])
+        setQuizResult(null)
+        return
+      }
+
+      setPhases(G)
+      const idx = Math.min(
+        Math.max(0, p?.currentPhaseIndex ?? 0),
+        Math.max(0, G.length - 1),
+      )
+      setCurrentPhaseIndex(idx)
+      phaseIndexRef.current = idx
+      setTeachingState(coerceTeachingState(p?.teachingState ?? null))
+      setShowAdvanceCard(!!p?.showAdvanceCard)
+      setOfferTaskCompleteSuggest(!!p?.offerTaskCompleteSuggest)
+      setQuizQuestions(Array.isArray(p?.quizQuestions) ? p.quizQuestions : [])
+      setCurrentQuizIndex(typeof p?.currentQuizIndex === "number" ? p.currentQuizIndex : 0)
+      setQuizAnswers(Array.isArray(p?.quizAnswers) ? p.quizAnswers : [])
+      setQuizResult(p?.quizResult ?? null)
+      return
+    }
+
+    if (p?.v === 1 && Array.isArray(p.phases) && p.phases.length > 0) {
+      setPhases(p.phases)
+      const idx = Math.min(
+        Math.max(0, p.currentPhaseIndex),
+        Math.max(0, p.phases.length - 1),
+      )
+      setCurrentPhaseIndex(idx)
+      phaseIndexRef.current = idx
+      setTeachingState(coerceTeachingState(p.teachingState))
+      setShowAdvanceCard(!!p.showAdvanceCard)
+      setOfferTaskCompleteSuggest(!!p.offerTaskCompleteSuggest)
+      setQuizQuestions(Array.isArray(p.quizQuestions) ? p.quizQuestions : [])
+      setCurrentQuizIndex(
+        typeof p.currentQuizIndex === "number" ? p.currentQuizIndex : 0,
+      )
+      setQuizAnswers(Array.isArray(p.quizAnswers) ? p.quizAnswers : [])
+      setQuizResult(p.quizResult ?? null)
+      return
+    }
+
+    if (messagesLength > 0) {
+      setTeachingState("loading")
+      generateTeachingPlan(
+        goalTitle,
+        phaseTitle,
+        task,
+        selectedModel,
+        siblingTaskTitles,
+      )
+        .then((plan) => {
+          setPhases(plan)
+          setCurrentPhaseIndex(0)
+          phaseIndexRef.current = 0
+          setTeachingState("teaching")
+        })
+        .catch(() => {
+          setPlanError(true)
+          setTeachingState(null)
+        })
+      return
+    }
+
+    setTeachingState("loading")
+    generateTeachingPlan(
+      goalTitle,
+      phaseTitle,
+      task,
+      selectedModel,
+      siblingTaskTitles,
+    )
       .then((plan) => {
         setPhases(plan)
+        setCurrentPhaseIndex(0)
+        phaseIndexRef.current = 0
         setTeachingState("teaching")
       })
       .catch(() => {
         setPlanError(true)
-        setTeachingState(null) // fall back to unstructured mode
+        setTeachingState(null)
       })
-  }, [isNewChat]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    historyReady,
+    sessionKey,
+    taskScopeKey,
+    persistedTeaching,
+    messagesLength,
+    goalTitle,
+    phaseTitle,
+    task.title,
+    task.description,
+    task.type,
+    selectedModel,
+    siblingTaskTitles,
+    lessonStepsFingerprint,
+  ])
 
   const currentPhase = phases[currentPhaseIndex] ?? null
 
-  // Build the context object that TaskChat passes to the system prompt generator
   const teachingContext: TeachingContext | undefined = (() => {
     if (!teachingState || teachingState === "loading") return undefined
-    if (teachingState === "quiz_active" || teachingState === "quiz_result_pass" || teachingState === "quiz_result_fail") return undefined
+    if (
+      teachingState === "quiz_active" ||
+      teachingState === "quiz_result_pass" ||
+      teachingState === "quiz_result_fail"
+    )
+      return undefined
 
-    if (teachingState === "teaching" && currentPhase) {
-      return {
-        state: "teaching",
-        currentPhase,
-        totalPhases: phases.length,
+    if (teachingState === "teaching") {
+      const idx = phaseIndexRef.current
+      const phaseForPrompt = phases[idx] ?? null
+      if (phaseForPrompt) {
+        return {
+          state: "teaching",
+          currentPhase: phaseForPrompt,
+          totalPhases: phases.length,
+        }
       }
     }
     if (teachingState === "quiz_prompt") {
@@ -114,11 +298,6 @@ export function useTaskTeaching({
     return undefined
   })()
 
-  /**
-   * Parse AI response for teaching markers, strip them from the visible text,
-   * and trigger side-effects (phase advance card, quiz prompt, etc.)
-   * Returns the cleaned response text.
-   */
   function handleAIMarkers(rawResponse: string): string {
     let clean = rawResponse
 
@@ -131,12 +310,18 @@ export function useTaskTeaching({
 
     if (rawResponse.includes("[PHASE_COMPLETE]")) {
       clean = rawResponse.replaceAll("[PHASE_COMPLETE]", "").trim()
-      if (currentPhaseIndex >= phases.length - 1) {
-        // shouldn't normally happen (last phase should emit QUIZ_READY) but handle gracefully
+      const idx = phaseIndexRef.current
+      if (phases.length > 0 && idx >= phases.length - 1) {
         setTeachingState("quiz_prompt")
       } else {
         setShowAdvanceCard(true)
       }
+      return clean
+    }
+
+    if (rawResponse.includes(TASK_COMPLETE_SUGGEST_MARKER)) {
+      clean = rawResponse.replaceAll(TASK_COMPLETE_SUGGEST_MARKER, "").trim()
+      setOfferTaskCompleteSuggest(true)
       return clean
     }
 
@@ -145,25 +330,50 @@ export function useTaskTeaching({
 
   function advancePhase() {
     setShowAdvanceCard(false)
-    setCurrentPhaseIndex((i) => i + 1)
+    setCurrentPhaseIndex((i) => {
+      const next = Math.min(i + 1, Math.max(0, phases.length - 1))
+      phaseIndexRef.current = next
+      return next
+    })
+  }
+
+  function advancePhaseAndGetContinuePrompt(): string {
+    setShowAdvanceCard(false)
+    // Must not read `next` from inside setState's updater — React may run it after this
+    // function returns, so `next` would still be 0 and the user message would say "Phase 1".
+    const i = phaseIndexRef.current
+    const next = Math.min(i + 1, Math.max(0, phases.length - 1))
+    phaseIndexRef.current = next
+    setCurrentPhaseIndex(next)
+    return `I'm ready for lesson step ${next + 1} of ${phases.length} for this checklist task (the next micro-curriculum step in this chat).`
   }
 
   function stayInPhase() {
     setShowAdvanceCard(false)
   }
 
+  function dismissTaskCompleteSuggest() {
+    setOfferTaskCompleteSuggest(false)
+  }
+
   async function startQuiz() {
     if (generatingQuiz) return
     setGeneratingQuiz(true)
     try {
-      const questions = await generateAdaptiveQuiz(goalTitle, task, messages, undefined, selectedModel)
+      const questions = await generateAdaptiveQuiz(
+        goalTitle,
+        task,
+        messages,
+        undefined,
+        selectedModel,
+      )
       setQuizQuestions(questions)
       setCurrentQuizIndex(0)
       setQuizAnswers([])
       setQuizResult(null)
       setTeachingState("quiz_active")
     } catch {
-      // quiz generation failed — just leave in quiz_prompt state, user can retry
+      /* keep quiz_prompt */
     } finally {
       setGeneratingQuiz(false)
     }
@@ -173,7 +383,10 @@ export function useTaskTeaching({
     const question = quizQuestions[currentQuizIndex]
     if (!question) return
 
-    const newAnswers = [...quizAnswers, { questionId: question.id, userAnswer: answerIndex }]
+    const newAnswers = [
+      ...quizAnswers,
+      { questionId: question.id, userAnswer: answerIndex },
+    ]
     setQuizAnswers(newAnswers)
 
     if (currentQuizIndex < quizQuestions.length - 1) {
@@ -202,7 +415,7 @@ export function useTaskTeaching({
       setQuizResult(null)
       setTeachingState("quiz_active")
     } catch {
-      // keep showing result screen
+      /* keep result */
     } finally {
       setGeneratingQuiz(false)
     }
@@ -212,6 +425,26 @@ export function useTaskTeaching({
     setTeachingState("recap")
   }
 
+  function getTeachingPersist(
+    checklistSelections?: Record<string, number[]>,
+  ): TaskTeachingPersistV1 | null {
+    if (teachingState === "loading") return null
+    if (!phases.length && teachingState === null) return null
+    const ts = teachingState === null ? "teaching" : teachingState
+    return buildTaskTeachingPersistV1({
+      phases,
+      currentPhaseIndex,
+      teachingState: ts,
+      showAdvanceCard,
+      offerTaskCompleteSuggest,
+      quizQuestions,
+      currentQuizIndex,
+      quizAnswers,
+      quizResult,
+      checklistSelections,
+    })
+  }
+
   return {
     teachingState,
     phases,
@@ -219,6 +452,7 @@ export function useTaskTeaching({
     currentPhaseIndex,
     totalPhases: phases.length,
     showAdvanceCard,
+    offerTaskCompleteSuggest,
     quizQuestions,
     currentQuizIndex,
     quizAnswers,
@@ -226,12 +460,15 @@ export function useTaskTeaching({
     generatingQuiz,
     planError,
     teachingContext,
+    dismissTaskCompleteSuggest,
     handleAIMarkers,
     advancePhase,
+    advancePhaseAndGetContinuePrompt,
     stayInPhase,
     startQuiz,
     answerQuizQuestion,
     retakeQuiz,
     startRecap,
+    getTeachingPersist,
   }
 }

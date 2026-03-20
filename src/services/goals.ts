@@ -1,4 +1,9 @@
 import { db } from "@/lib/firebase"
+import type { LessonStep } from "@/types/curriculum"
+import type { TaskTeachingPersistV1 } from "@/services/taskTeaching"
+import { parseTaskTeachingPersist } from "@/services/taskTeaching"
+
+export type { LessonStep } from "@/types/curriculum"
 import {
   collection,
   doc,
@@ -7,6 +12,8 @@ import {
   getDocs,
   query,
   where,
+  writeBatch,
+  deleteDoc,
 } from "firebase/firestore"
 
 export interface Task {
@@ -16,6 +23,8 @@ export interface Task {
   estimatedDays: number
   completed?: boolean
   completedAt?: string
+  /** Stored micro-curriculum for this checklist task (3 lesson steps). */
+  lessonSteps?: LessonStep[]
 }
 
 export interface Phase {
@@ -37,6 +46,25 @@ export interface GoalProfile {
   notes?: string
 }
 
+/** One line of durable progress for cross-task AI context */
+export interface TaskOutcome {
+  phaseIndex: number
+  taskIndex: number
+  taskTitle: string
+  summary: string
+  quizPassed?: boolean
+  quizScore?: number
+  weakTopics?: string[]
+  updatedAt: string
+}
+
+/** Rolling narrative + outcomes — injected into task/home prompts (not raw chat logs) */
+export interface GoalState {
+  workingSummary: string
+  taskOutcomes: TaskOutcome[]
+  updatedAt: string
+}
+
 export interface Goal {
   id?: string
   uid?: string
@@ -49,6 +77,14 @@ export interface Goal {
   progress?: number
   // Per-goal \"memory\" distilled from the discovery chat
   profile?: GoalProfile
+  /** Unified coach memory across tasks */
+  goalState?: GoalState
+  /** Last time user opened a task chat or completed work (ISO) */
+  lastActivityAt?: string
+  lastTouchedPhaseIndex?: number
+  lastTouchedTaskIndex?: number
+  /** Set when every task has validated `lessonSteps` (plan v1 curriculum). */
+  curriculumSchemaVersion?: 1
 }
 
 export async function createGoal(uid: string, goal: Goal): Promise<string> {
@@ -111,6 +147,25 @@ export async function updateGoalStatus(
   await setDoc(docRef, updateData, { merge: true })
 }
 
+/** Deletes all `taskChats` subdocuments then the goal (chunked batches ≤ 500 ops). */
+export async function deleteGoal(uid: string, goalId: string): Promise<void> {
+  const goalRef = doc(db, "users", uid, "goals", goalId)
+  const chatsRef = collection(db, "users", uid, "goals", goalId, "taskChats")
+  const chatsSnap = await getDocs(chatsRef)
+  const chatDocs = chatsSnap.docs
+
+  const chunkSize = 400
+  for (let i = 0; i < chatDocs.length; i += chunkSize) {
+    const batch = writeBatch(db)
+    for (const d of chatDocs.slice(i, i + chunkSize)) {
+      batch.delete(d.ref)
+    }
+    await batch.commit()
+  }
+
+  await deleteDoc(goalRef)
+}
+
 export interface ChatMessage {
   role: "user" | "assistant"
   content: string
@@ -122,9 +177,27 @@ export async function saveTaskChat(
   phaseIndex: number,
   taskIndex: number,
   messages: ChatMessage[],
+  teachingPersist?: TaskTeachingPersistV1 | null,
 ): Promise<void> {
   const chatRef = doc(db, "users", uid, "goals", goalId, "taskChats", `${phaseIndex}_${taskIndex}`)
-  await setDoc(chatRef, { messages, updatedAt: new Date().toISOString() })
+  const payload: Record<string, unknown> = {
+    messages,
+    updatedAt: new Date().toISOString(),
+  }
+  if (teachingPersist !== undefined) {
+    if (teachingPersist === null) {
+      payload.teachingPersist = null
+    } else {
+      // Firestore rejects nested `undefined`; JSON round-trip drops those keys.
+      payload.teachingPersist = JSON.parse(JSON.stringify(teachingPersist)) as TaskTeachingPersistV1
+    }
+  }
+  await setDoc(chatRef, payload, { merge: true })
+}
+
+export interface TaskChatDocument {
+  messages: ChatMessage[]
+  teachingPersist: TaskTeachingPersistV1 | null
 }
 
 export async function loadTaskChat(
@@ -133,10 +206,23 @@ export async function loadTaskChat(
   phaseIndex: number,
   taskIndex: number,
 ): Promise<ChatMessage[]> {
+  const data = await loadTaskChatDocument(uid, goalId, phaseIndex, taskIndex)
+  return data.messages
+}
+
+export async function loadTaskChatDocument(
+  uid: string,
+  goalId: string,
+  phaseIndex: number,
+  taskIndex: number,
+): Promise<TaskChatDocument> {
   const chatRef = doc(db, "users", uid, "goals", goalId, "taskChats", `${phaseIndex}_${taskIndex}`)
   const snap = await getDoc(chatRef)
-  if (!snap.exists()) return []
-  return (snap.data().messages ?? []) as ChatMessage[]
+  if (!snap.exists()) return { messages: [], teachingPersist: null }
+  const data = snap.data()
+  const messages = (data.messages ?? []) as ChatMessage[]
+  const teachingPersist = parseTaskTeachingPersist(data.teachingPersist)
+  return { messages, teachingPersist }
 }
 
 export async function updateTaskCompletion(

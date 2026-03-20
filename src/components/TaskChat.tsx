@@ -1,6 +1,8 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import {
   ArrowLeft,
+  PanelLeft,
+  PanelLeftClose,
   ChevronLeft,
   ChevronRight,
   Send,
@@ -14,9 +16,17 @@ import {
   Trash2,
   Copy,
   Check,
+  ListChecks,
 } from "lucide-react"
-import type { Task, ChatMessage, GoalProfile } from "@/services/goals"
-import { saveTaskChat, loadTaskChat } from "@/services/goals"
+import type { Task, ChatMessage, GoalProfile, GoalState } from "@/services/goals"
+import { saveTaskChat, loadTaskChatDocument } from "@/services/goals"
+import type { TaskTeachingPersistV1 } from "@/services/taskTeaching"
+import { TASK_COMPLETE_SUGGEST_MARKER } from "@/services/taskTeaching"
+import {
+  touchGoalActivity,
+  recordQuizInGoalState,
+  maybeCompressTaskChatIntoGoalState,
+} from "@/services/goalState"
 import { auth } from "@/lib/firebase"
 import { callAIStream } from "@/services/ai"
 import { generateTaskGuideSystemPrompt, generateTaskSuggestedPrompt } from "@/services/prompts"
@@ -24,6 +34,7 @@ import { useModel } from "@/contexts/ModelContext"
 import { Markdown } from "@/components/Markdown"
 import { getUserProfile, type UserProfile } from "@/services/user"
 import { useTaskTeaching } from "@/hooks/useTaskTeaching"
+import { parseWidgets } from "@/lib/parseWidgets"
 
 interface TaskChatProps {
   task: Task
@@ -34,12 +45,19 @@ interface TaskChatProps {
   taskIndex: number
   onClose: () => void
   goalProfile?: GoalProfile
+  /** Unified coach memory across tasks */
+  goalState?: GoalState | null
+  /** After goalState updates in Firestore, refresh parent goal query */
+  onGoalStateUpdated?: () => void
   phaseTasks: Task[]
   isDesktopSideView?: boolean
   onNavigateTask?: (direction: number) => void
   hasPrevTask?: boolean
   hasNextTask?: boolean
   onMarkComplete?: () => void
+  /** Desktop split view: hide plan panel for a wider, centered reading column */
+  readingFocusMode?: boolean
+  onToggleReadingFocus?: () => void
 }
 
 function scrollToBottom(el: HTMLDivElement | null, smooth = true) {
@@ -62,12 +80,21 @@ export function TaskChat({
   hasPrevTask,
   hasNextTask,
   onMarkComplete,
+  readingFocusMode,
+  onToggleReadingFocus,
+  goalState,
+  onGoalStateUpdated,
 }: TaskChatProps) {
   const { selectedModel } = useModel()
+  const [focusMode, setFocusMode] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [youtubeMeta, setYoutubeMeta] = useState<Record<number, { youtubeSearches: string[]; channels: string[] }>>({})
   const [input, setInput] = useState("")
   const [loadingHistory, setLoadingHistory] = useState(true)
+  const [chatHydrationReady, setChatHydrationReady] = useState(false)
+  const [loadedPersist, setLoadedPersist] = useState<TaskTeachingPersistV1 | null>(null)
+  const [sessionKey, setSessionKey] = useState(0)
+  const [checklistSelections, setChecklistSelections] = useState<Record<string, number[]>>({})
   const [sending, setSending] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -75,10 +102,13 @@ export function TaskChat({
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const prevLengthRef = useRef(0)
+  const quizGoalStateRecordedRef = useRef<string | null>(null)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
 
-  // Derived: is this a fresh chat (no history)?
-  const isNewChat = !loadingHistory && messages.length === 0
+  const taskScopeKey = `${goalId}-${phaseIndex}-${taskIndex}`
+  const siblingRoadmapTitles = phaseTasks
+    .filter((_, idx) => idx !== taskIndex)
+    .map((t) => t.title)
 
   const teaching = useTaskTeaching({
     task,
@@ -86,8 +116,21 @@ export function TaskChat({
     phaseTitle,
     messages,
     selectedModel,
-    isNewChat,
+    historyReady: chatHydrationReady && !loadingHistory,
+    persistedTeaching: loadedPersist,
+    messagesLength: messages.length,
+    sessionKey,
+    taskScopeKey,
+    siblingTaskTitles: siblingRoadmapTitles,
   })
+
+  const handleChecklistChange = useCallback(
+    (messageIndex: number, slot: number, indices: number[]) => {
+      const key = `${messageIndex}-${slot}`
+      setChecklistSelections((prev) => ({ ...prev, [key]: indices }))
+    },
+    [],
+  )
 
   useEffect(() => {
     setSuggestedPrompt(generateTaskSuggestedPrompt(task))
@@ -97,22 +140,45 @@ export function TaskChat({
     clean: string
     meta?: { youtubeSearches: string[]; channels: string[] }
   } {
-    const match = text.match(/```duwit\s*([\s\S]*?)\s*```/i)
-    if (!match?.[1]) return { clean: text }
-    try {
-      const obj = JSON.parse(match[1]) as Partial<{ youtubeSearches: unknown; channels: unknown }>
-      const youtubeSearches = Array.isArray(obj.youtubeSearches)
-        ? obj.youtubeSearches.filter((x): x is string => typeof x === "string").slice(0, 8)
-        : []
-      const channels = Array.isArray(obj.channels)
-        ? obj.channels.filter((x): x is string => typeof x === "string").slice(0, 8)
-        : []
-      const clean = text.replace(match[0], "").trim()
-      if (youtubeSearches.length === 0 && channels.length === 0) return { clean }
-      return { clean, meta: { youtubeSearches, channels } }
-    } catch {
+    const { segments } = parseWidgets(text)
+    const widgets = segments.filter(
+      (seg): seg is Extract<(typeof segments)[number], { kind: "widget" }> =>
+        seg.kind === "widget",
+    )
+
+    // Preserve any non-YouTube widgets in the final message content.
+    // The legacy clean/meta behavior should only run for old YouTube-only payloads.
+    if (widgets.some((seg) => seg.widget.type !== "youtube")) {
       return { clean: text }
     }
+
+    const textParts = segments
+      .filter((seg) => seg.kind === "text")
+      .map((seg) => seg.content)
+
+    const clean = textParts.join("\n").trim()
+
+    const youtubeWidget = segments.find(
+      (seg) => seg.kind === "widget" && seg.widget.type === "youtube"
+    )
+
+    if (!youtubeWidget || youtubeWidget.kind !== "widget") {
+      return { clean: clean || text }
+    }
+
+    const data = youtubeWidget.widget.data
+    const youtubeSearches = Array.isArray(data.youtubeSearches)
+      ? (data.youtubeSearches as string[]).slice(0, 8)
+      : []
+    const channels = Array.isArray(data.channels)
+      ? (data.channels as string[]).slice(0, 8)
+      : []
+
+    if (youtubeSearches.length === 0 && channels.length === 0) {
+      return { clean: clean || text }
+    }
+
+    return { clean: clean || text, meta: { youtubeSearches, channels } }
   }
 
   function youtubeSearchUrl(q: string) {
@@ -134,10 +200,58 @@ export function TaskChat({
 
   useEffect(() => {
     const uid = auth.currentUser?.uid
-    if (!uid) { setLoadingHistory(false); return }
+    if (!uid) return
+    void touchGoalActivity(uid, goalId, phaseIndex, taskIndex)
+  }, [goalId, phaseIndex, taskIndex])
+
+  useEffect(() => {
+    quizGoalStateRecordedRef.current = null
+  }, [goalId, phaseIndex, taskIndex])
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid
+    if (!uid || !teaching.quizResult) return
+    const r = teaching.quizResult
+    const sig = `${phaseIndex}_${taskIndex}_${r.score}_${r.total}_${r.passed}`
+    if (quizGoalStateRecordedRef.current === sig) return
+    quizGoalStateRecordedRef.current = sig
+    void recordQuizInGoalState(
+      uid,
+      goalId,
+      goalTitle,
+      goalProfile,
+      phaseIndex,
+      taskIndex,
+      task.title,
+      r,
+      selectedModel,
+    )
+      .then(() => onGoalStateUpdated?.())
+      .catch(() => {})
+  }, [
+    teaching.quizResult,
+    goalId,
+    goalTitle,
+    goalProfile,
+    phaseIndex,
+    taskIndex,
+    task.title,
+    selectedModel,
+    onGoalStateUpdated,
+  ])
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid
+    setChatHydrationReady(false)
+    setLoadedPersist(null)
+    if (!uid) {
+      setLoadingHistory(false)
+      setChatHydrationReady(true)
+      return
+    }
     setLoadingHistory(true)
-    loadTaskChat(uid, goalId, phaseIndex, taskIndex)
-      .then((saved) => {
+    loadTaskChatDocument(uid, goalId, phaseIndex, taskIndex)
+      .then(({ messages: saved, teachingPersist }) => {
         const nextMeta: Record<number, { youtubeSearches: string[]; channels: string[] }> = {}
         const cleaned = saved.map((m, idx) => {
           if (m.role !== "assistant") return m
@@ -147,10 +261,47 @@ export function TaskChat({
         })
         setYoutubeMeta(nextMeta)
         setMessages(cleaned)
+        setLoadedPersist(teachingPersist)
+        setChecklistSelections(teachingPersist?.checklistSelections ?? {})
       })
       .catch(() => {})
-      .finally(() => setLoadingHistory(false))
+      .finally(() => {
+        setLoadingHistory(false)
+        setChatHydrationReady(true)
+      })
   }, [goalId, phaseIndex, taskIndex])
+
+  // Persist messages + teaching snapshot. Never skip messages while plan is generating:
+  // during "loading", omit teachingPersist (undefined) so merge keeps the existing snapshot.
+  useEffect(() => {
+    if (!chatHydrationReady || loadingHistory) return
+    const uid = auth.currentUser?.uid
+    if (!uid) return
+    const persist =
+      teaching.teachingState === "loading"
+        ? undefined
+        : teaching.getTeachingPersist(checklistSelections)
+    void saveTaskChat(uid, goalId, phaseIndex, taskIndex, messages, persist).catch(console.error)
+  }, [
+    chatHydrationReady,
+    loadingHistory,
+    goalId,
+    phaseIndex,
+    taskIndex,
+    messages,
+    checklistSelections,
+    teaching.teachingState,
+    teaching.currentPhaseIndex,
+    teaching.showAdvanceCard,
+    teaching.offerTaskCompleteSuggest,
+    teaching.quizQuestions,
+    teaching.currentQuizIndex,
+    teaching.quizAnswers,
+    teaching.quizResult,
+    teaching.phases,
+    teaching.totalPhases,
+    teaching.generatingQuiz,
+  ])
 
   useEffect(() => {
     if (messages.length > prevLengthRef.current) {
@@ -187,11 +338,31 @@ export function TaskChat({
     setSending(true)
 
     try {
+      const storedLessonObjectives =
+        task.lessonSteps?.length &&
+        teaching.teachingState === "teaching" &&
+        task.lessonSteps[teaching.currentPhaseIndex]
+          ? task.lessonSteps[teaching.currentPhaseIndex].objectives
+          : undefined
+
       let systemPrompt = generateTaskGuideSystemPrompt(
         goalTitle,
         phaseTitle,
         task,
         teaching.teachingContext,
+        {
+          goalState: goalState ?? undefined,
+          goalProfile: goalProfile ?? undefined,
+          focusMode,
+          planPhaseIndex: phaseIndex,
+          planTaskIndex: taskIndex,
+          siblingRoadmapTaskTitles: siblingRoadmapTitles,
+          inChatPhaseTitles:
+            teaching.phases.length > 0
+              ? teaching.phases.map((p) => p.title)
+              : undefined,
+          storedLessonObjectives,
+        },
       )
 
       const lines: string[] = []
@@ -203,23 +374,21 @@ export function TaskChat({
         if (userProfile.preferredTone) lines.push(`- Tone: ${userProfile.preferredTone}`)
       }
       if (goalProfile) {
-        lines.push("", "Goal-specific profile:")
+        lines.push("", "Goal-specific profile (detail):")
         lines.push(`- Experience level: ${goalProfile.experienceLevel}`)
         lines.push(`- Time per day: ${goalProfile.timePerDay}`)
-        lines.push(`- Motivation: ${goalProfile.motivation}`)
-        lines.push(`- Success definition: ${goalProfile.successDefinition}`)
         if (goalProfile.notes) lines.push(`- Notes: ${goalProfile.notes}`)
       }
       if (phaseTasks.length > 0) {
-        lines.push("", "Phase tasks and completion state:")
+        lines.push("", "Checklist tasks in this roadmap section (each row = separate chat):")
         phaseTasks.forEach((t, idx) => {
           const status = t.completed ? "[x]" : "[ ]"
-          const marker = idx === taskIndex ? " (CURRENT)" : ""
+          const marker = idx === taskIndex ? " (THIS CHAT)" : ""
           lines.push(`${status} ${idx + 1}. ${t.title}${marker}`)
         })
         lines.push(
           "",
-          "Use this to avoid re-teaching earlier tasks.",
+          "Sibling rows are not part of this chat's lesson steps. The 3 lesson steps (UI may say Phase 1–3) are micro-beats inside the CURRENT row only — lesson step 2 is never 'the next checkbox task'.",
         )
       }
       if (lines.length > 0) {
@@ -259,15 +428,16 @@ export function TaskChat({
       const response = await callAIStream({
         prompt: history,
         systemPrompt,
-        temperature: 0.7,
-        maxOutputTokens: 900,
+        temperature: focusMode ? 0.42 : 0.55,
+        maxOutputTokens: focusMode ? 650 : 900,
         modelName: selectedModel,
         onChunk: (piece) => {
           accumulated += piece
           const displayText = truncateAtStudentTurn(
             accumulated
               .replaceAll("[PHASE_COMPLETE]", "")
-              .replaceAll("[QUIZ_READY]", ""),
+              .replaceAll("[QUIZ_READY]", "")
+              .replaceAll(TASK_COMPLETE_SUGGEST_MARKER, ""),
           )
           setMessages([...updated, { role: "assistant", content: displayText }])
         },
@@ -282,7 +452,27 @@ export function TaskChat({
       }
       const final: ChatMessage[] = [...updated, { role: "assistant", content: parsed.clean }]
       setMessages(final)
-      if (uid) saveTaskChat(uid, goalId, phaseIndex, taskIndex, final).catch(console.error)
+      if (uid && chatHydrationReady) {
+        void saveTaskChat(uid, goalId, phaseIndex, taskIndex, final, undefined).catch(console.error)
+      }
+      if (uid) {
+        void touchGoalActivity(uid, goalId, phaseIndex, taskIndex)
+        void maybeCompressTaskChatIntoGoalState(
+          uid,
+          goalId,
+          goalTitle,
+          goalProfile,
+          phaseIndex,
+          taskIndex,
+          task.title,
+          final,
+          selectedModel,
+        )
+          .then((did) => {
+            if (did) onGoalStateUpdated?.()
+          })
+          .catch(() => {})
+      }
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -308,9 +498,12 @@ export function TaskChat({
     const uid = auth.currentUser?.uid
     setMessages([])
     setYoutubeMeta({})
+    setChecklistSelections({})
+    setLoadedPersist(null)
+    setSessionKey((k) => k + 1)
     setInput("")
     setConfirmReset(false)
-    if (uid) saveTaskChat(uid, goalId, phaseIndex, taskIndex, []).catch(console.error)
+    if (uid) await saveTaskChat(uid, goalId, phaseIndex, taskIndex, [], null).catch(console.error)
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -320,17 +513,40 @@ export function TaskChat({
     }
   }
 
-  const maxWidth = isDesktopSideView ? "max-w-3xl" : "max-w-lg"
+  const maxWidth =
+    isDesktopSideView && readingFocusMode
+      ? "max-w-4xl"
+      : isDesktopSideView
+        ? "max-w-3xl"
+        : "max-w-lg"
   const isQuizMode = teaching.teachingState === "quiz_active"
   const isQuizResultMode =
     teaching.teachingState === "quiz_result_pass" ||
     teaching.teachingState === "quiz_result_fail"
 
-  // ── Phase indicator (shown in the header for structured mode) ────────────
-  const showPhaseIndicator =
-    teaching.teachingState === "teaching" &&
-    teaching.totalPhases > 0 &&
-    teaching.currentPhase !== null
+  const structuredTeachingChrome =
+    teaching.teachingState !== null &&
+    teaching.teachingState !== "loading" &&
+    teaching.totalPhases > 0
+
+  const headerTeachingLabel = (() => {
+    if (!structuredTeachingChrome) return null
+    const n = teaching.totalPhases
+    if (
+      teaching.teachingState === "quiz_active" ||
+      teaching.teachingState === "quiz_result_pass" ||
+      teaching.teachingState === "quiz_result_fail"
+    ) {
+      return "Quiz · scored MCQ"
+    }
+    if (teaching.teachingState === "quiz_prompt") {
+      return `Phases done · ${n}/${n} → quiz`
+    }
+    if (teaching.teachingState === "recap") {
+      return "Quiz review"
+    }
+    return `Phase ${teaching.currentPhaseIndex + 1}/${n}`
+  })()
 
   return (
     <div className={`${isDesktopSideView ? "h-full" : "fixed inset-0 z-50"} flex flex-col bg-background animate-in fade-in duration-200`}>
@@ -346,6 +562,21 @@ export function TaskChat({
             <ArrowLeft className="h-4 w-4" />
           </button>
 
+          {isDesktopSideView && onToggleReadingFocus && (
+            <button
+              type="button"
+              onClick={onToggleReadingFocus}
+              className="shrink-0 h-7 w-7 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title={readingFocusMode ? "Show plan sidebar" : "Focus on chat (hide plan)"}
+            >
+              {readingFocusMode ? (
+                <PanelLeft className="h-4 w-4" />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" />
+              )}
+            </button>
+          )}
+
           <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-hidden">
             <span className="text-[11px] text-muted-foreground truncate shrink-0 max-w-[100px] sm:max-w-[160px]">
               {phaseTitle}
@@ -354,21 +585,32 @@ export function TaskChat({
             <span className="text-[11px] font-semibold text-foreground truncate">{task.title}</span>
           </div>
 
-          {showPhaseIndicator && (
-            <div className="shrink-0 flex items-center gap-1.5 bg-brand/10 text-brand px-2.5 py-0.5 rounded-full border border-brand/20">
-              <BookOpen className="h-3 w-3" />
-              <span className="text-[10px] font-bold">
-                Phase {teaching.currentPhaseIndex + 1}/{teaching.totalPhases}
-              </span>
+          {headerTeachingLabel && (
+            <div className="shrink-0 flex items-center gap-1.5 bg-brand/10 text-brand px-2.5 py-0.5 rounded-full border border-brand/20 max-w-[140px] sm:max-w-none">
+              <BookOpen className="h-3 w-3 shrink-0" />
+              <span className="text-[10px] font-bold truncate">{headerTeachingLabel}</span>
             </div>
           )}
 
-          {!showPhaseIndicator && (
+          {!headerTeachingLabel && (
             <div className="shrink-0 flex items-center gap-1 bg-brand/10 text-brand px-2 py-0.5 rounded-full border border-brand/20">
               <Sparkles className="h-3 w-3" />
               <span className="text-[9px] font-black uppercase tracking-tight">AI</span>
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={() => setFocusMode((v) => !v)}
+            className={`shrink-0 h-7 w-7 flex items-center justify-center rounded-full transition-colors ${
+              focusMode
+                ? "bg-brand/15 text-brand border border-brand/30"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+            }`}
+            title={focusMode ? "Focus mode on — shorter, execution-style replies" : "Focus mode — shorter replies"}
+          >
+            <ListChecks className="h-3.5 w-3.5" />
+          </button>
 
           {/* Copy chat button */}
           {messages.length > 0 && (
@@ -436,14 +678,24 @@ export function TaskChat({
         </div>
 
         {/* Phase progress bar */}
-        {showPhaseIndicator && (
+        {structuredTeachingChrome && teaching.teachingState === "teaching" && (
           <div className="h-0.5 bg-muted/60 mx-3 mb-0.5 rounded-full overflow-hidden">
             <div
               className="h-full bg-brand/60 rounded-full transition-all duration-500"
-              style={{ width: `${((teaching.currentPhaseIndex + 1) / teaching.totalPhases) * 100}%` }}
+              style={{
+                width: `${((teaching.currentPhaseIndex + 1) / teaching.totalPhases) * 100}%`,
+              }}
             />
           </div>
         )}
+        {structuredTeachingChrome &&
+          (teaching.teachingState === "quiz_active" ||
+            teaching.teachingState === "quiz_result_pass" ||
+            teaching.teachingState === "quiz_result_fail") && (
+            <div className="h-0.5 bg-muted/60 mx-3 mb-0.5 rounded-full overflow-hidden">
+              <div className="h-full w-full bg-brand/50 rounded-full" />
+            </div>
+          )}
       </div>
 
       {/* ── Messages ────────────────────────────────────────────────────── */}
@@ -510,22 +762,29 @@ export function TaskChat({
                     key={i}
                     className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}
                   >
-                    <div className={msg.role === "user" ? "max-w-[82%]" : "w-full"}>
+                    <div className={msg.role === "user" ? "max-w-[min(82%,28rem)]" : "w-full"}>
                       {msg.role === "assistant" ? (
                         /* AI: no bubble — full-width, comfortable reading */
                         <div
                           dir={isRtl ? "rtl" : "ltr"}
                           className={`text-sm leading-7 text-foreground py-1 ${isRtl ? "text-right" : ""}`}
                         >
-                          <Markdown content={msg.content} className={isRtl ? "text-right" : undefined} />
+                          <Markdown
+                            content={msg.content}
+                            className={isRtl ? "text-right" : undefined}
+                            getChecklistInitial={(slot) => checklistSelections[`${i}-${slot}`]}
+                            onChecklistChange={(slot, indices) =>
+                              handleChecklistChange(i, slot, indices)
+                            }
+                          />
                         </div>
                       ) : (
-                        /* User: fully rounded pill */
+                        /* User: fixed corner radius avoids collapsing to a circle on narrow widths */
                         <div
                           dir={isRtl ? "rtl" : "ltr"}
-                          className={`rounded-full px-4 py-2.5 text-sm leading-relaxed bg-primary text-primary-foreground ${isRtl ? "text-right" : ""}`}
+                          className={`rounded-[1.25rem] px-4 py-2.5 text-sm leading-relaxed bg-primary text-primary-foreground ${isRtl ? "text-right" : "text-left"}`}
                         >
-                          <span className="whitespace-pre-wrap">{msg.content}</span>
+                          <span className="whitespace-pre-wrap block">{msg.content}</span>
                         </div>
                       )}
 
@@ -573,6 +832,55 @@ export function TaskChat({
             </div>
           )}
 
+          {/* ── Suggested: mark task complete (model emitted [TASK_COMPLETE_SUGGEST]) ── */}
+          {teaching.offerTaskCompleteSuggest &&
+            !isQuizMode &&
+            !isQuizResultMode &&
+            teaching.teachingState !== "quiz_prompt" && (
+            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <div className="rounded-2xl border border-green-500/25 bg-green-500/5 p-4 space-y-3">
+                <p className="text-sm font-semibold">Ready to finish this task?</p>
+                <p className="text-xs text-muted-foreground">
+                  Mark it complete on your plan when you&apos;re satisfied, or open the next task.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {onMarkComplete && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        teaching.dismissTaskCompleteSuggest()
+                        onMarkComplete()
+                        onClose()
+                      }}
+                      className="h-9 px-4 rounded-xl bg-brand text-white text-xs font-semibold hover:bg-brand/90"
+                    >
+                      Mark complete
+                    </button>
+                  )}
+                  {onNavigateTask && hasNextTask && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        teaching.dismissTaskCompleteSuggest()
+                        onNavigateTask(1)
+                      }}
+                      className="h-9 px-4 rounded-xl border border-border/80 text-xs font-semibold hover:bg-muted"
+                    >
+                      Next task
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => teaching.dismissTaskCompleteSuggest()}
+                    className="h-9 px-4 rounded-xl text-xs font-semibold text-muted-foreground hover:bg-muted"
+                  >
+                    Not yet
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── Phase Advance Card ─────────────────────────────────────── */}
           {teaching.showAdvanceCard && teaching.currentPhase && !isQuizMode && !isQuizResultMode && (
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -597,8 +905,8 @@ export function TaskChat({
                   <button
                     type="button"
                     onClick={() => {
-                      teaching.advancePhase()
-                      sendMessage(`I'm ready to move to Phase ${teaching.currentPhaseIndex + 2}.`)
+                      const line = teaching.advancePhaseAndGetContinuePrompt()
+                      void sendMessage(line)
                     }}
                     className="flex-1 h-9 rounded-xl bg-brand text-white text-xs font-semibold hover:bg-brand/90 transition-colors flex items-center justify-center gap-1.5"
                   >
@@ -628,7 +936,7 @@ export function TaskChat({
                   <div>
                     <p className="text-sm font-semibold">Ready to test your knowledge?</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      4 quick questions based on what you just learned.
+                      Four multiple-choice questions (pick one correct answer each) — saved if you leave and come back.
                     </p>
                   </div>
                 </div>

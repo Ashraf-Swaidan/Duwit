@@ -7,15 +7,17 @@ import {
   buildContextHash,
   buildInstantGreeting,
   buildGoalSuggestions,
+  goalsToConciergeRows,
   loadCachedGreeting,
   saveCachedGreeting,
   type CachedGreeting,
 } from "@/services/userContext"
-import { callAIStream } from "@/services/ai"
+import { callAI, callAIStream } from "@/services/ai"
 import { HOME_CONCIERGE_SYSTEM_PROMPT, generateHomeConciergePrompt } from "@/services/prompts"
 import { Send, Sparkles } from 'lucide-react'
 import { Markdown } from "@/components/Markdown"
 import { loadHomeChat, saveHomeChat, clearHomeChat } from "@/services/homeChatStore"
+import { useModel } from "@/contexts/ModelContext"
 
 export const Route = createFileRoute('/')(({
   component: HomePage,
@@ -27,11 +29,14 @@ interface Message {
 }
 
 const NAVIGATE_REGEX = /\[NAVIGATE:([^\]]+)\]/
+/** Sentinel from HOME_CONCIERGE_SYSTEM_PROMPT — opens /new-goal, not a Firestore id */
+const NAVIGATE_NEW_GOAL = 'new-goal'
 
 function HomePage() {
   const user = auth.currentUser
   const navigate = useNavigate()
   const firstName = user?.displayName?.split(' ')[0] || user?.email?.split('@')[0] || 'there'
+  const { selectedModel } = useModel()
 
   const { data: goals = [], isPending: goalsLoading } = useQuery({
     queryKey: ['goals', user?.uid],
@@ -47,6 +52,7 @@ function HomePage() {
   const [isNavigatingGoal, setIsNavigatingGoal] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const goalsContextHashRef = useRef<string | null>(null)
 
   // ─── Boot: hydrate or show greeting on goals load ─────────────────────────
   useEffect(() => {
@@ -58,8 +64,19 @@ function HomePage() {
     const isFresh = cached.lastUpdated && Date.now() - cached.lastUpdated < STALE_MS
 
     if (cached.messages.length > 0 && isFresh) {
-      setMessages(cached.messages)
-      setPendingNavGoalId(cached.pendingNavGoalId)
+      let pending = cached.pendingNavGoalId
+      if (pending && pending !== NAVIGATE_NEW_GOAL && !goals.some((g) => g.id === pending)) {
+        pending = null
+      }
+      const userSpoke = cached.messages.some((m) => m.role === "user")
+      const pristineOpener =
+        !userSpoke && cached.messages.length === 1 && cached.messages[0].role === "assistant"
+      setMessages(
+        pristineOpener
+          ? [{ role: "assistant", content: buildInstantGreeting(firstName, goals) }]
+          : cached.messages,
+      )
+      setPendingNavGoalId(pending)
       setGreetingReady(true)
       return
     } else if (cached.messages.length > 0 && !isFresh) {
@@ -80,6 +97,30 @@ function HomePage() {
       initGreeting()
     }
   }, [goals, goalsLoading, greetingReady]) // eslint-disable-line react-hooks-exhaustive-deps
+
+  // When goals change (e.g. deleted elsewhere), drop stale nav + refresh template opener if user hasn’t chatted yet
+  useEffect(() => {
+    if (goalsLoading || !greetingReady) return
+
+    const hash = buildContextHash(goals)
+    if (goalsContextHashRef.current === hash) return
+
+    const hadPreviousSnapshot = goalsContextHashRef.current !== null
+    goalsContextHashRef.current = hash
+
+    setPendingNavGoalId((p) => {
+      if (!p || p === NAVIGATE_NEW_GOAL) return p
+      return goals.some((g) => g.id === p) ? p : null
+    })
+
+    if (!hadPreviousSnapshot) return
+
+    setMessages((prev) => {
+      const userSpoke = prev.some((m) => m.role === "user")
+      if (userSpoke || prev.length !== 1 || prev[0].role !== "assistant") return prev
+      return [{ role: "assistant", content: buildInstantGreeting(firstName, goals) }]
+    })
+  }, [goals, goalsLoading, greetingReady, firstName])
 
   async function initGreeting() {
     setGreetingReady(true)
@@ -108,18 +149,14 @@ function HomePage() {
 
     // 3. Context changed — ask AI for a fresh greeting in the background
     try {
-      const goalData = goals.map((g) => ({
-        id: g.id!,
-        title: g.title,
-        progress: g.progress ?? 0,
-      }))
+      const goalData = goalsToConciergeRows(goals)
       const greetingPrompt = generateHomeConciergePrompt(goalData, `The user just opened the app. Generate a warm, personalised greeting (2-3 sentences) that:\n- Acknowledges their most in-progress or recently active goal\n- Suggests they continue it or asks what they'd like to focus on today\n- Feels conversational, not scripted`)
       const aiGreeting = await callAI({
         prompt: greetingPrompt,
-
         systemPrompt: HOME_CONCIERGE_SYSTEM_PROMPT,
-        temperature: 0.8,
+        temperature: 0.55,
         maxOutputTokens: 150,
+        modelName: selectedModel,
       })
 
       const cleanGreeting = aiGreeting.replace(NAVIGATE_REGEX, '').trim()
@@ -160,11 +197,7 @@ function HomePage() {
     setIsThinking(true)
 
     try {
-      const goalData = goals.map((g) => ({
-        id: g.id!,
-        title: g.title,
-        progress: g.progress ?? 0,
-      }))
+      const goalData = goalsToConciergeRows(goals)
 
       const conversation = nextMessages
         .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
@@ -177,8 +210,9 @@ function HomePage() {
       const aiResponse = await callAIStream({
         prompt: generateHomeConciergePrompt(goalData, conversation),
         systemPrompt: HOME_CONCIERGE_SYSTEM_PROMPT,
-        temperature: 0.7,
+        temperature: 0.55,
         maxOutputTokens: 200,
+        modelName: selectedModel,
         onChunk: (piece) => {
           accumulated += piece
           const displayText = accumulated.replace(NAVIGATE_REGEX, '').trim()
@@ -224,6 +258,8 @@ function HomePage() {
   const pendingGoal = pendingNavGoalId
     ? goals.find((g) => g.id === pendingNavGoalId) ?? null
     : null
+  const pendingNewGoalFlow =
+    pendingNavGoalId === NAVIGATE_NEW_GOAL && pendingGoal === null
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
@@ -231,49 +267,50 @@ function HomePage() {
       {/* Messages area */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6 space-y-4 pb-28">
         <div className="max-w-2xl mx-auto space-y-4">
-          {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1 duration-200`}
-            >
-              {msg.role === 'assistant' && (
-                <div className="h-8 w-8 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mr-3 mt-0.5">
-                  <Sparkles className="h-3.5 w-3.5 text-brand" />
-                </div>
-              )}
-              {msg.role === 'assistant' ? (
-                /* AI: no bubble, full-width comfortable reading */
-                <div
-                  className="flex-1 text-sm leading-7 text-foreground py-0.5"
-                  style={{ wordBreak: 'break-word' }}
-                >
-                  <Markdown content={msg.content} />
-                </div>
-              ) : (
-                /* User: fully rounded pill */
-                <div
-                  className="rounded-full px-4 py-2.5 max-w-[82%] text-sm leading-relaxed bg-brand text-white"
-                  style={{ wordBreak: 'break-word' }}
-                >
-                  <span className="whitespace-pre-wrap">{msg.content}</span>
-                </div>
-              )}
-            </div>
-          ))}
+          {messages.map((msg, i) => {
+            const isAssistantStreamingShell =
+              msg.role === 'assistant' &&
+              msg.content === '' &&
+              isThinking &&
+              i === messages.length - 1
 
-          {/* Typing dots only shown before the first chunk arrives */}
-          {isThinking && messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content === '' && (
-            <div className="flex justify-start items-center gap-2.5">
-              <div className="h-8 w-8 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0">
-                <Sparkles className="h-3.5 w-3.5 text-brand" />
+            return (
+              <div
+                key={i}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1 duration-200`}
+              >
+                {msg.role === 'assistant' && (
+                  <div className="h-8 w-8 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mr-3 mt-0.5">
+                    <Sparkles className="h-3.5 w-3.5 text-brand" />
+                  </div>
+                )}
+                {msg.role === 'assistant' ? (
+                  <div
+                    className="flex-1 min-w-0 text-sm leading-7 text-foreground py-0.5"
+                    style={{ wordBreak: 'break-word' }}
+                  >
+                    {isAssistantStreamingShell ? (
+                      <div className="flex items-center gap-1.5 py-2" aria-hidden>
+                        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.3s]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.15s]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce" />
+                      </div>
+                    ) : (
+                      <Markdown content={msg.content} />
+                    )}
+                  </div>
+                ) : (
+                  /* User: large radius reads as a pill for long text but won't collapse to a circle on narrow widths */
+                  <div
+                    className="max-w-[min(82%,28rem)] rounded-[1.25rem] px-4 py-2.5 text-sm leading-relaxed bg-brand text-white text-left"
+                    style={{ wordBreak: 'break-word' }}
+                  >
+                    <span className="whitespace-pre-wrap block">{msg.content}</span>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-1.5 py-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.3s]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.15s]" />
-                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce" />
-              </div>
-            </div>
-          )}
+            )
+          })}
 
           <div ref={bottomRef} />
         </div>
@@ -298,6 +335,61 @@ function HomePage() {
       )}
 
       {/* Pending navigation confirmation */}
+      {pendingNewGoalFlow && (
+        <div className="px-4 pb-3">
+          <div className="max-w-2xl mx-auto">
+            <div className="rounded-2xl border border-border/70 bg-card/95 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 animate-in fade-in slide-in-from-bottom-1 duration-200">
+              <div>
+                {isNavigatingGoal ? (
+                  <>
+                    <p className="text-sm font-semibold">Starting new goal…</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Opening the planner so you can shape your plan.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-semibold">Create a new goal?</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      I can take you to the guided flow to define what you want and build a plan.
+                    </p>
+                  </>
+                )}
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isNavigatingGoal) return
+                    setPendingNavGoalId(null)
+                  }}
+                  className="h-8 px-3 rounded-xl text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                  disabled={isNavigatingGoal}
+                >
+                  Not now
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isNavigatingGoal) return
+                    setIsNavigatingGoal(true)
+                    setTimeout(() => {
+                      setPendingNavGoalId(null)
+                      setIsNavigatingGoal(false)
+                      navigate({ to: '/new-goal' })
+                    }, 800)
+                  }}
+                  className="h-8 px-3 rounded-xl text-xs font-semibold bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-60"
+                  disabled={isNavigatingGoal}
+                >
+                  {isNavigatingGoal ? 'Opening…' : 'Start new goal'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {pendingGoal && (
         <div className="px-4 pb-3">
           <div className="max-w-2xl mx-auto">

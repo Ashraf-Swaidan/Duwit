@@ -1,9 +1,13 @@
-import { useState } from "react"
-import { ArrowLeft } from "lucide-react"
+import { useState, useEffect } from "react"
+import { useNavigate } from "@tanstack/react-router"
+import { ArrowLeft, Trash2 } from "lucide-react"
 import { PhaseCard } from "@/components/PhaseCard"
 import { TaskChat } from "@/components/TaskChat"
+import { DeleteGoalConfirm } from "@/components/DeleteGoalConfirm"
 import { auth } from "@/lib/firebase"
-import { getGoal, updateTaskCompletion, type Task } from "@/services/goals"
+import { deleteGoal, getGoal, updateTaskCompletion, type Task } from "@/services/goals"
+import { recordTaskMarkedCompleteInGoalState } from "@/services/goalState"
+import { notifyHomeGoalsChanged } from "@/services/userContext"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 interface PlanViewProps {
@@ -20,9 +24,17 @@ interface ActiveChat {
 
 export function PlanView({ goalId, onBack }: PlanViewProps) {
   const user = auth.currentUser
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [updating, setUpdating] = useState(false)
   const [activeChat, setActiveChat] = useState<ActiveChat | null>(null)
+  const [readingFocusMode, setReadingFocusMode] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+
+  useEffect(() => {
+    if (!activeChat) setReadingFocusMode(false)
+  }, [activeChat])
 
   const { data: goal, isLoading: loading, error } = useQuery({
     queryKey: ['goal', goalId],
@@ -35,6 +47,22 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
     setUpdating(true)
     try {
       await updateTaskCompletion(user.uid, goalId, phaseIndex, taskIndex, completed)
+      if (completed) {
+        const t = goal.phases[phaseIndex]?.tasks[taskIndex]
+        if (t) {
+          void recordTaskMarkedCompleteInGoalState(
+            user.uid,
+            goalId,
+            goal.title,
+            goal.profile,
+            phaseIndex,
+            taskIndex,
+            t.title,
+          )
+            .then(() => queryClient.invalidateQueries({ queryKey: ["goal", goalId] }))
+            .catch(() => {})
+        }
+      }
       await queryClient.invalidateQueries({ queryKey: ["goal", goalId] })
       await queryClient.invalidateQueries({ queryKey: ["goals"] })
     } catch (e) {
@@ -85,13 +113,35 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
   const doneTasks = goal.phases.reduce((a, p) => a + p.tasks.filter((t) => t.completed).length, 0)
   const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0
 
+  async function handleConfirmDelete() {
+    if (!user) return
+    setDeleteBusy(true)
+    try {
+      await deleteGoal(user.uid, goalId)
+      await queryClient.removeQueries({ queryKey: ["goal", goalId] })
+      await notifyHomeGoalsChanged(user.uid, queryClient)
+      setDeleteOpen(false)
+      navigate({ to: "/goals" })
+    } catch (e) {
+      console.error("Failed to delete goal:", e)
+    } finally {
+      setDeleteBusy(false)
+    }
+  }
+
+  const planColumnVisible = Boolean(activeChat && !readingFocusMode)
+
   return (
     <div className="h-[calc(100vh-3.5rem)] flex flex-col bg-background overflow-hidden">
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Main Plan Area */}
         <div
-          className={`h-full overflow-y-auto transition-all duration-300 scroll-smooth ${
-            activeChat ? "hidden lg:block lg:w-2/5 lg:max-w-sm xl:max-w-md lg:border-r border-border/60" : "w-full"
+          className={`h-full overflow-y-auto transition-all duration-300 ease-out scroll-smooth ${
+            planColumnVisible
+              ? "hidden lg:block lg:w-2/5 lg:max-w-sm xl:max-w-md lg:border-r border-border/60"
+              : activeChat
+                ? "hidden"
+                : "w-full"
           }`}
         >
           <div className="px-4 pt-6 pb-24 space-y-6 max-w-4xl mx-auto">
@@ -115,6 +165,14 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
                     <p className="text-sm text-muted-foreground mt-1">{goal.description}</p>
                   )}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setDeleteOpen(true)}
+                  className="shrink-0 mt-0.5 p-2 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                  title="Delete goal"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </div>
 
               {/* Progress */}
@@ -171,7 +229,12 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
 
         {/* Chat Area (Responsive) */}
         {activeChat && (
-          <div className="flex-1 bg-background relative z-40 lg:z-0 animate-in slide-in-from-right duration-300 h-full overflow-hidden">
+          <div
+            className={`flex-1 bg-background relative z-40 lg:z-0 animate-in slide-in-from-right duration-300 h-full overflow-hidden flex flex-col ${
+              readingFocusMode ? "lg:items-center" : ""
+            }`}
+          >
+            <div className={`w-full h-full min-h-0 ${readingFocusMode ? "lg:max-w-4xl" : ""}`}>
             <TaskChat
               task={activeChat.task}
               goalId={goalId}
@@ -180,9 +243,15 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
               phaseIndex={activeChat.phaseIndex}
               taskIndex={activeChat.taskIndex}
               goalProfile={goal.profile}
+              goalState={goal.goalState}
+              onGoalStateUpdated={() =>
+                queryClient.invalidateQueries({ queryKey: ["goal", goalId] })
+              }
               phaseTasks={goal.phases[activeChat.phaseIndex].tasks}
               onClose={() => setActiveChat(null)}
               isDesktopSideView={true}
+              readingFocusMode={readingFocusMode}
+              onToggleReadingFocus={() => setReadingFocusMode((v) => !v)}
               onMarkComplete={() =>
                 handleTaskToggle(activeChat.phaseIndex, activeChat.taskIndex, true)
               }
@@ -214,9 +283,18 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
                 activeChat.taskIndex < goal.phases[activeChat.phaseIndex].tasks.length - 1
               }
             />
+            </div>
           </div>
         )}
       </div>
+
+      <DeleteGoalConfirm
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        goalTitle={goal.title}
+        onConfirm={handleConfirmDelete}
+        isDeleting={deleteBusy}
+      />
     </div>
   )
 }

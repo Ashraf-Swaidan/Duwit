@@ -1,3 +1,5 @@
+import { useState } from "react"
+import { ChevronDown } from "lucide-react"
 import type { Task } from "@/services/goals"
 
 interface TaskItemProps {
@@ -31,6 +33,8 @@ export function TaskItem({
   isActive,
 }: TaskItemProps) {
   const type = typeConfig[task.type] ?? typeConfig.learn
+  const [curriculumOpen, setCurriculumOpen] = useState(false)
+  const hasCurriculum = !!task.lessonSteps?.length
 
   return (
     <div
@@ -84,14 +88,54 @@ export function TaskItem({
 
         <p className="text-xs text-muted-foreground leading-relaxed mb-2">{task.description}</p>
 
-          <span className="text-xs text-muted-foreground">
-            {task.estimatedDays} {task.estimatedDays === 1 ? "day" : "days"}
-            {task.completedAt && (
-              <span className="ml-2 text-brand font-medium">
-                · done {new Date(task.completedAt).toLocaleDateString()}
+        {hasCurriculum ? (
+          <div className="mb-2 rounded-lg border border-border/50 bg-muted/20 overflow-hidden">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                setCurriculumOpen((o) => !o)
+              }}
+              className="w-full flex items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-muted/40 transition-colors"
+            >
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">
+                Lesson steps ({task.lessonSteps!.length})
               </span>
+              <ChevronDown
+                className={`h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform ${curriculumOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+            {curriculumOpen && (
+              <div className="px-2 pb-2 pt-0 space-y-2 border-t border-border/40">
+                {task.lessonSteps!.map((step, si) => (
+                  <div key={si} className="pt-2 first:pt-1.5">
+                    <p className="text-[11px] font-semibold text-foreground">
+                      {si + 1}. {step.title}
+                    </p>
+                    <ul className="mt-1 ml-2 space-y-0.5 list-disc list-inside text-[10px] text-muted-foreground leading-relaxed">
+                      {step.objectives.map((o, oi) => (
+                        <li key={oi}>{o}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
             )}
-          </span>
+          </div>
+        ) : (
+          <p className="text-[10px] text-muted-foreground/80 mb-2">
+            Open chat to generate lessons for this task.
+          </p>
+        )}
+
+        <span className="text-xs text-muted-foreground">
+          {task.estimatedDays} {task.estimatedDays === 1 ? "day" : "days"}
+          {task.completedAt && (
+            <span className="ml-2 text-brand font-medium">
+              · done {new Date(task.completedAt).toLocaleDateString()}
+            </span>
+          )}
+        </span>
       </div>
     </div>
   )

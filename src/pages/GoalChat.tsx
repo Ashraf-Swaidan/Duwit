@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react"
 import { ArrowLeft, Send, Zap, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { auth } from "@/lib/firebase"
-import { callAI, callAIStructured } from "@/services/ai"
+import { callAIStream, callAIStructured } from "@/services/ai"
 import {
   GOAL_CHAT_SYSTEM_PROMPT,
   PLAN_READY_MARKER,
@@ -11,6 +11,7 @@ import {
   generateGoalProfilePrompt,
 } from "@/services/prompts"
 import { createGoal, type Goal, type ChatMessage, type GoalProfile } from "@/services/goals"
+import { expandCurriculumForPlan } from "@/services/curriculumExpansion"
 import { useModel } from "@/contexts/ModelContext"
 import { getUserProfile, type UserProfile } from "@/services/user"
 import { Markdown } from "@/components/Markdown"
@@ -35,6 +36,8 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
   const [sending, setSending] = useState(false)
   const [planReady, setPlanReady] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [generationStep, setGenerationStep] = useState<"roadmap" | "lessons">("roadmap")
+  const [lessonProgress, setLessonProgress] = useState({ done: 0, total: 0 })
   const [genError, setGenError] = useState<string | null>(null)
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -56,6 +59,16 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
     requestAnimationFrame(() => el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }))
   }, [messages, sending])
 
+  function cleanStreamText(raw: string): string {
+    let clean = raw.replace(/<\/coach>[\s\S]*$/, "").trim()
+    const cutPatterns = [/<user>/i, /\nUser:/i, /\nMe:/i]
+    for (const pat of cutPatterns) {
+      const idx = clean.search(pat)
+      if (idx !== -1) clean = clean.slice(0, idx).trim()
+    }
+    return clean.replaceAll(PLAN_READY_MARKER, "").trim()
+  }
+
   async function sendMessage(text: string) {
     const trimmed = text.trim()
     if (!trimmed || sending || generating) return
@@ -65,22 +78,16 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
     setMessages(updated)
     setInput("")
     setSending(true)
-    // Reset textarea height
-    if (inputRef.current) {
-      inputRef.current.style.height = "auto"
-    }
+    if (inputRef.current) inputRef.current.style.height = "auto"
 
     try {
-      // XML-style tags prevent the model from pattern-matching into continuing
-      // both sides of the conversation.
       const history = updated
         .map((m) =>
           m.role === "user"
             ? `<user>${m.content}</user>`
             : `<coach>${m.content}</coach>`,
         )
-        .join("\n")
-        + "\n<coach>"
+        .join("\n") + "\n<coach>"
 
       const systemPrompt =
         userProfile && (userProfile.nickname || userProfile.preferredLanguage || userProfile.preferredLearningStyle)
@@ -93,26 +100,24 @@ User profile for this conversation:
 - Tone preference: ${userProfile.preferredTone ?? "neutral"}`
           : GOAL_CHAT_SYSTEM_PROMPT
 
-      const rawFull = await callAI({
+      // Streaming placeholder
+      setMessages([...updated, { role: "assistant", content: "" }])
+
+      let accumulated = ""
+      const response = await callAIStream({
         prompt: history,
         systemPrompt,
         temperature: 0.8,
         maxOutputTokens: 350,
         modelName: selectedModel,
+        onChunk: (piece) => {
+          accumulated += piece
+          setMessages([...updated, { role: "assistant", content: cleanStreamText(accumulated) }])
+        },
       })
 
-      // Strip the closing </coach> tag then cut off any hallucinated user turn
-      let raw = rawFull.replace(/<\/coach>[\s\S]*$/, "").trim()
-      const cutPatterns = [/<user>/i, /\nUser:/i, /\nMe:/i]
-      for (const pat of cutPatterns) {
-        const idx = raw.search(pat)
-        if (idx !== -1) raw = raw.slice(0, idx).trim()
-      }
-
-      const isReady = raw.includes(PLAN_READY_MARKER)
-      const content = raw.replaceAll(PLAN_READY_MARKER, "").trim()
-
-      setMessages([...updated, { role: "assistant", content }])
+      const isReady = response.includes(PLAN_READY_MARKER)
+      setMessages([...updated, { role: "assistant", content: cleanStreamText(response) }])
       if (isReady) setPlanReady(true)
     } catch {
       setMessages((prev) => [
@@ -127,8 +132,10 @@ User profile for this conversation:
   async function handleGeneratePlan() {
     if (!user || generating) return
     setGenerating(true)
+    setGenerationStep("roadmap")
     setGenError(null)
 
+    let step: "roadmap" | "lessons" = "roadmap"
     try {
       // 1) Build the plan from the conversation
       const planPrompt = generatePlanFromChatPrompt(messages)
@@ -156,16 +163,26 @@ User profile for this conversation:
         profile = undefined
       }
 
-      const goalPayload: Goal = {
+      const skeleton: Goal = {
         ...(plan as Goal),
         profile,
       }
 
-      const goalId = await createGoal(user.uid, goalPayload)
+      step = "lessons"
+      setGenerationStep("lessons")
+      const expanded = await expandCurriculumForPlan(skeleton, selectedModel, (done, total) => {
+        setLessonProgress({ done, total })
+      })
+
+      const goalId = await createGoal(user.uid, expanded)
       onSuccess(goalId)
     } catch (e) {
       console.error("Plan generation error:", e)
-      setGenError("Couldn't generate the plan. Please try again.")
+      setGenError(
+        step === "lessons"
+          ? "Couldn't generate lessons for one part of your plan. Try again or shorten the goal."
+          : "Couldn't generate the plan. Please try again.",
+      )
       setGenerating(false)
     }
   }
@@ -188,9 +205,15 @@ User profile for this conversation:
           <div className="absolute inset-0 rounded-full border-2 border-brand/20 animate-ping" />
         </div>
         <div className="text-center space-y-1.5">
-          <h2 className="font-bold text-xl">Building your plan…</h2>
+          <h2 className="font-bold text-xl">
+            {generationStep === "lessons" && lessonProgress.total > 0
+              ? `Detailing lessons (${lessonProgress.done}/${lessonProgress.total})…`
+              : "Outlining roadmap…"}
+          </h2>
           <p className="text-sm text-muted-foreground max-w-xs">
-            Crafting a personalized roadmap based on everything we discussed.
+            {generationStep === "lessons"
+              ? "Generating the lesson steps each task will follow."
+              : "Crafting a personalized roadmap based on everything we discussed."}
           </p>
         </div>
         <div className="flex gap-1.5">
@@ -205,76 +228,72 @@ User profile for this conversation:
   // ── Chat screen ────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-[calc(100svh-3.5rem)] w-full">
-      <div className="flex-1 min-h-0 w-full max-w-2xl mx-auto flex flex-col">
-        {/* Back nav */}
-        <div className="shrink-0 px-4 pt-5 pb-1">
+      {/* Message thread */}
+      <div
+        ref={scrollRef}
+        className="flex-1 min-h-0 overflow-y-auto px-4 py-6 pb-32"
+      >
+        <div className="max-w-2xl mx-auto space-y-4">
+          {/* Back nav */}
           <button
             onClick={onBack}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors -ml-1"
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors -ml-1 mb-2"
           >
             <ArrowLeft className="h-4 w-4" />
             Back
           </button>
-        </div>
 
-        {/* Message thread */}
-        <div
-          ref={scrollRef}
-          className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3"
-        >
-          {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-1 duration-200`}
-            >
-              {msg.role === "assistant" && (
-                <div className="h-6 w-6 rounded-full bg-brand/15 flex items-center justify-center mr-2 mt-1 shrink-0">
-                  <Sparkles className="h-3 w-3 text-brand" />
-                </div>
-              )}
-              {(() => {
-                const isRtl = /[\u0600-\u06FF]/.test(msg.content)
-                return (
+          {messages.map((msg, i) => {
+            const isRtl = /[\u0600-\u06FF]/.test(msg.content)
+            const isStreamingShell =
+              msg.role === "assistant" &&
+              msg.content === "" &&
+              sending &&
+              i === messages.length - 1
+            return (
+              <div
+                key={i}
+                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}
+              >
+                {msg.role === "assistant" && (
+                  <div className="h-8 w-8 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center mr-3 mt-0.5 shrink-0">
+                    <Sparkles className="h-3.5 w-3.5 text-brand" />
+                  </div>
+                )}
+                {msg.role === "assistant" ? (
                   <div
                     dir={isRtl ? "rtl" : "ltr"}
-                    className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
-                      msg.role === "user"
-                        ? "bg-primary text-primary-foreground rounded-br-sm"
-                        : "bg-muted text-foreground rounded-bl-sm"
-                    } ${isRtl ? "text-right" : ""}`}
+                    className={`flex-1 text-sm leading-7 text-foreground py-0.5 ${isRtl ? "text-right" : ""}`}
+                    style={{ wordBreak: "break-word" }}
                   >
-                    {msg.role === "assistant" ? (
-                      <Markdown content={msg.content} className={isRtl ? "text-right" : undefined} />
+                    {isStreamingShell ? (
+                      <div className="flex items-center gap-1.5 py-2" aria-hidden>
+                        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.3s]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.15s]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce" />
+                      </div>
                     ) : (
-                      <span className="whitespace-pre-wrap">{msg.content}</span>
+                      <Markdown content={msg.content} className={isRtl ? "text-right" : undefined} />
                     )}
                   </div>
-                )
-              })()}
-            </div>
-          ))}
-
-          {/* Typing indicator */}
-          {sending && (
-            <div className="flex justify-start animate-in fade-in duration-150">
-              <div className="h-6 w-6 rounded-full bg-brand/15 flex items-center justify-center mr-2 mt-1 shrink-0">
-                <Sparkles className="h-3 w-3 text-brand" />
+                ) : (
+                  <div
+                    dir={isRtl ? "rtl" : "ltr"}
+                    className={`max-w-[min(82%,28rem)] rounded-[1.25rem] px-4 py-2.5 text-sm leading-relaxed bg-primary text-primary-foreground ${isRtl ? "text-right" : "text-left"}`}
+                    style={{ wordBreak: "break-word" }}
+                  >
+                    <span className="whitespace-pre-wrap block">{msg.content}</span>
+                  </div>
+                )}
               </div>
-              <div className="rounded-2xl rounded-bl-sm bg-muted px-4 py-3">
-                <div className="flex gap-1.5 items-center">
-                  <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:-0.3s]" />
-                  <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:-0.15s]" />
-                  <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce" />
-                </div>
-              </div>
-            </div>
-          )}
+            )
+          })}
         </div>
       </div>
 
-      {/* Plan-ready banner — appears when AI signals it has enough context */}
+      {/* Plan-ready banner */}
       {planReady && (
-        <div className="shrink-0 w-full max-w-2xl mx-auto px-4 mb-3">
+        <div className="shrink-0 w-full max-w-2xl mx-auto px-4 mb-2">
           <div className="rounded-2xl bg-brand/8 border border-brand/20 px-4 py-3.5 flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-bold leading-snug">Ready to build your plan</p>
@@ -297,31 +316,33 @@ User profile for this conversation:
         </div>
       )}
 
-      {/* Input bar */}
-      <div className="shrink-0 border-t border-border/60 bg-background px-4 py-3">
-        <div className="w-full max-w-2xl mx-auto flex gap-2 items-end">
-          <textarea
-            ref={inputRef}
-            rows={1}
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value)
-              e.target.style.height = "auto"
-              e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"
-            }}
-            onKeyDown={handleKeyDown}
-            placeholder={planReady ? "Add more context or build the plan…" : "Tell me your goal…"}
-            disabled={sending || generating}
-            className="flex-1 resize-none rounded-2xl border bg-card px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40 transition-all placeholder:text-muted-foreground/60 disabled:opacity-50 leading-relaxed"
-            style={{ minHeight: "42px", maxHeight: "120px", overflowY: "auto" }}
-          />
-          <button
-            onClick={() => sendMessage(input)}
-            disabled={!input.trim() || sending || generating}
-            className="h-[42px] w-[42px] shrink-0 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:opacity-80 transition-opacity disabled:opacity-30 disabled:pointer-events-none"
-          >
-            <Send className="h-4 w-4" />
-          </button>
+      {/* Floating input */}
+      <div className="sticky bottom-0 px-4 pb-5 pt-2 bg-linear-to-t from-background via-background/95 to-transparent">
+        <div className="w-full max-w-2xl mx-auto">
+          <div className="flex items-end gap-2 rounded-3xl border border-border/70 bg-card/95 backdrop-blur-md shadow-lg shadow-black/5 px-3.5 py-2.5 focus-within:border-brand/40 focus-within:ring-2 focus-within:ring-brand/15 transition-all">
+            <textarea
+              ref={inputRef}
+              rows={1}
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value)
+                e.target.style.height = "auto"
+                e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder={planReady ? "Add more context or build the plan…" : "Tell me your goal…"}
+              disabled={sending || generating}
+              className="flex-1 resize-none bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 leading-relaxed py-1"
+              style={{ minHeight: "24px", maxHeight: "120px", overflowY: "auto" }}
+            />
+            <button
+              onClick={() => sendMessage(input)}
+              disabled={!input.trim() || sending || generating}
+              className="shrink-0 h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:opacity-80 transition-opacity disabled:opacity-30 disabled:pointer-events-none shadow-sm"
+            >
+              <Send className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -1,11 +1,24 @@
 import { createContext, useContext, useState, type ReactNode } from "react"
 
-export const AVAILABLE_MODELS = [
-  { id: "gemma-3-27b-it", name: "Gemma 3 27B", description: "Default · Free tier" },
-  { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", description: "Fast & capable" },
-  { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash", description: "Balanced performance" },
-  { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", description: "Most powerful" },
+export const MODEL_GROUPS = [
+  {
+    label: "Gemini",
+    models: [
+      { id: "gemini-3-flash-preview",      name: "Gemini 3 Flash",       description: "Most powerful · Frontier tier" },
+      { id: "gemini-3.1-flash-lite-preview",name: "Gemini 3.1 Flash Lite", description: "Ultra-fast · Gemini 3 series" },
+      { id: "gemini-2.5-flash",            name: "Gemini 2.5 Flash",      description: "Very powerful · Stable" },
+      { id: "gemini-2.5-flash-lite",       name: "Gemini 2.5 Flash Lite", description: "Fast & light · Stable" },
+    ],
+  },
+  {
+    label: "Gemma",
+    models: [
+      { id: "gemma-3-27b-it", name: "Gemma 3 27B", description: "Default · Free tier" },
+    ],
+  },
 ] as const
+
+export const AVAILABLE_MODELS = MODEL_GROUPS.flatMap((g) => g.models)
 
 export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"]
 

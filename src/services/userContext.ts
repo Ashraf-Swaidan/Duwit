@@ -1,6 +1,8 @@
 import { db } from "@/lib/firebase"
-import { doc, getDoc, setDoc } from "firebase/firestore"
+import { deleteDoc, doc, getDoc, setDoc } from "firebase/firestore"
+import type { QueryClient } from "@tanstack/react-query"
 import type { Goal } from "@/services/goals"
+import type { HomeConciergeGoalRow } from "@/services/prompts"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,7 +36,10 @@ export interface CachedGreeting {
  * which tells us a fresh AI greeting is needed.
  */
 export function buildContextHash(goals: Goal[]): string {
-  const parts = goals.map((g) => `${g.id}:${g.progress ?? 0}:${g.status}`)
+  const parts = goals.map(
+    (g) =>
+      `${g.id}:${g.progress ?? 0}:${g.status}:${g.lastActivityAt ?? ""}:${g.goalState?.updatedAt ?? ""}`,
+  )
   return parts.sort().join("|")
 }
 
@@ -64,6 +69,11 @@ export function deriveUserContext(goals: Goal[]): UserContext {
 function getLastActivityTime(goal: Goal): number {
   let latest = new Date(goal.createdAt).getTime()
 
+  if (goal.lastActivityAt) {
+    const t = new Date(goal.lastActivityAt).getTime()
+    if (!Number.isNaN(t) && t > latest) latest = t
+  }
+
   for (const phase of goal.phases ?? []) {
     for (const task of phase.tasks ?? []) {
       if (task.completedAt) {
@@ -88,6 +98,18 @@ export async function loadCachedGreeting(uid: string): Promise<CachedGreeting | 
 export async function saveCachedGreeting(uid: string, greeting: CachedGreeting): Promise<void> {
   const ref = doc(db, "users", uid, "meta", "homeGreeting")
   await setDoc(ref, greeting)
+}
+
+/** Clears persisted home greeting so the next visit regens against current goals (e.g. after delete). */
+export async function clearCachedGreeting(uid: string): Promise<void> {
+  const ref = doc(db, "users", uid, "meta", "homeGreeting")
+  await deleteDoc(ref)
+}
+
+/** Call after goals are added/removed so Home refetches goals and drops stale concierge cache. */
+export async function notifyHomeGoalsChanged(uid: string, queryClient: QueryClient): Promise<void> {
+  await clearCachedGreeting(uid).catch(() => {})
+  await queryClient.invalidateQueries({ queryKey: ["goals"] })
 }
 
 // ─── Core Logic ───────────────────────────────────────────────────────────────
@@ -153,4 +175,31 @@ export function buildGoalSuggestions(goals: Goal[]): GoalSuggestion[] {
     label: `Continue: ${g.title}`,
     progress: g.progress ?? 0,
   }))
+}
+
+function formatLastTouchedTaskLabel(g: Goal): string | undefined {
+  if (g.lastTouchedPhaseIndex == null || g.lastTouchedTaskIndex == null) return undefined
+  const phase = g.phases?.[g.lastTouchedPhaseIndex]
+  const task = phase?.tasks?.[g.lastTouchedTaskIndex]
+  if (!phase || !task) return undefined
+  return `${phase.title} › ${task.title}`
+}
+
+/** Rich rows for home AI: activity + coach memory snippets */
+export function goalsToConciergeRows(goals: Goal[]): HomeConciergeGoalRow[] {
+  return goals.map((g) => {
+    const sum = g.goalState?.workingSummary ?? ""
+    const snippet =
+      sum.length > 0
+        ? sum.slice(0, 240) + (sum.length > 240 ? "…" : "")
+        : undefined
+    return {
+      id: g.id!,
+      title: g.title,
+      progress: g.progress ?? 0,
+      lastActivityAt: g.lastActivityAt,
+      lastTouchedTaskLabel: formatLastTouchedTaskLabel(g),
+      workingSummarySnippet: snippet,
+    }
+  })
 }
