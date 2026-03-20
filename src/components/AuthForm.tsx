@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -7,15 +7,28 @@ import {
 import { auth, db } from "@/lib/firebase"
 import { doc, setDoc } from "firebase/firestore"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 
 type AuthMode = "login" | "signup"
 
 interface AuthFormProps {
   onSuccess?: () => void
+  /**
+   * `page` — full-viewport centered with wordmark (standalone auth screen).
+   * `split` — width-constrained block, no wordmark (legacy / side panels).
+   * `embedded` — card only; parent page supplies chrome and headline.
+   */
+  layout?: "page" | "split" | "embedded"
+  /** Initial tab when mounting (e.g. from `/login?mode=signup`). */
+  defaultMode?: AuthMode
 }
 
-export function AuthForm({ onSuccess }: AuthFormProps) {
-  const [mode, setMode] = useState<AuthMode>("login")
+export function AuthForm({ onSuccess, layout = "page", defaultMode = "login" }: AuthFormProps) {
+  const [mode, setMode] = useState<AuthMode>(defaultMode)
+
+  useEffect(() => {
+    setMode(defaultMode)
+  }, [defaultMode])
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [displayName, setDisplayName] = useState("")
@@ -51,17 +64,35 @@ export function AuthForm({ onSuccess }: AuthFormProps) {
     }
   }
 
+  const split = layout === "split"
+  const embedded = layout === "embedded"
+  const showWordmark = layout === "page"
+
   return (
-    <div className="min-h-svh flex flex-col items-center justify-center px-5 bg-background">
-      <div className="w-full max-w-sm space-y-8">
-        {/* Wordmark */}
-        <div className="text-center space-y-1">
-          <h1 className="text-5xl font-black tracking-tight">Duwit</h1>
-          <p className="text-muted-foreground text-sm">Turn goals into done.</p>
-        </div>
+    <div
+      className={cn(
+        embedded && "w-full",
+        split && "w-full max-w-md mx-auto px-4 py-10 lg:py-16 bg-background",
+        showWordmark && "min-h-svh flex flex-col items-center justify-center px-5 bg-background",
+      )}
+    >
+      <div className={cn("w-full space-y-8", showWordmark && "max-w-sm", embedded && "max-w-[420px] mx-auto")}>
+        {showWordmark && (
+          <div className="text-center space-y-1">
+            <h1 className="text-5xl font-black tracking-tight">Duwit</h1>
+            <p className="text-muted-foreground text-sm">Turn goals into done.</p>
+          </div>
+        )}
 
         {/* Form card */}
-        <div className="bg-card rounded-3xl border p-7 shadow-sm space-y-5">
+        <div
+          className={cn(
+            "rounded-3xl border p-7 space-y-5 transition-shadow",
+            embedded
+              ? "bg-card/95 border-border/80 shadow-lg shadow-brand/5 ring-1 ring-brand/10 backdrop-blur-sm"
+              : "bg-card border-border/80 shadow-sm",
+          )}
+        >
           <div className="space-y-1">
             <h2 className="font-bold text-lg">
               {mode === "login" ? "Welcome back" : "Create your account"}

@@ -5,10 +5,18 @@ import { PhaseCard } from "@/components/PhaseCard"
 import { TaskChat } from "@/components/TaskChat"
 import { DeleteGoalConfirm } from "@/components/DeleteGoalConfirm"
 import { auth } from "@/lib/firebase"
-import { deleteGoal, getGoal, updateTaskCompletion, type Task } from "@/services/goals"
+import { GoalCompleteCelebration } from "@/components/GoalCompleteCelebration"
+import {
+  deleteGoal,
+  getGoal,
+  isGoalCompleted,
+  updateTaskCompletion,
+  type Task,
+} from "@/services/goals"
 import { recordTaskMarkedCompleteInGoalState } from "@/services/goalState"
 import { notifyHomeGoalsChanged } from "@/services/userContext"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { cn } from "@/lib/utils"
 
 interface PlanViewProps {
   goalId: string
@@ -22,6 +30,114 @@ interface ActiveChat {
   phaseTitle: string
 }
 
+function PlanLoadingSkeleton({ onBack }: { onBack?: () => void }) {
+  const pulse = "animate-pulse motion-reduce:animate-none"
+  return (
+    <div
+      className="h-[calc(100vh-3.5rem)] flex flex-col bg-background overflow-hidden"
+      aria-busy="true"
+      aria-label="Loading goal"
+    >
+      <div className="flex-1 flex min-h-0 overflow-hidden">
+        <div className="h-full w-full overflow-y-auto scroll-smooth">
+          <div className="px-4 pt-6 pb-24 space-y-6 max-w-4xl mx-auto">
+            <div className="space-y-4">
+              <div className="flex items-start gap-3">
+                {onBack ? (
+                  <button
+                    type="button"
+                    onClick={onBack}
+                    className="shrink-0 mt-1 p-1 -ml-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    title="Back to goals"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <div className="mt-1 h-8 w-8 shrink-0 rounded-full bg-muted/40" />
+                )}
+                <div className="flex-1 min-w-0 space-y-2.5 pt-0.5">
+                  <div
+                    className={`h-8 max-w-[min(92%,18rem)] rounded-lg bg-muted/50 ${pulse}`}
+                  />
+                  <div className={`h-4 max-w-lg rounded-md bg-muted/35 ${pulse}`} />
+                </div>
+                <div className={`mt-0.5 h-9 w-9 shrink-0 rounded-full bg-muted/40 ${pulse}`} />
+              </div>
+
+              <div className="rounded-2xl border border-border/60 bg-card/50 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div className={`h-4 w-36 rounded-md bg-muted/45 ${pulse}`} />
+                  <div className={`h-4 w-14 rounded-md bg-muted/40 ${pulse}`} />
+                </div>
+                <div className="h-2.5 w-full rounded-full bg-muted/35 overflow-hidden">
+                  <div className={`h-full w-[38%] rounded-full bg-brand/20 ${pulse}`} />
+                </div>
+                <div className="flex gap-1 flex-1 items-center">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <div
+                      key={i}
+                      className={`h-1.5 flex-1 rounded-full bg-muted/40 ${pulse}`}
+                      style={{ animationDelay: `${i * 80}ms` }}
+                    />
+                  ))}
+                  <div className={`h-3 w-8 rounded bg-muted/35 ml-2 shrink-0 ${pulse}`} />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {[0, 1].map((phase) => (
+                <div
+                  key={phase}
+                  className="rounded-2xl border border-border/60 bg-card/40 overflow-hidden"
+                >
+                  <div className="px-5 py-4 flex items-center gap-4 border-b border-border/40">
+                    <div className={`h-8 w-8 shrink-0 rounded-full bg-muted/45 ${pulse}`} />
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div
+                        className={`h-4 max-w-56 rounded-md bg-muted/50 ${pulse}`}
+                      />
+                      <div className="flex items-center gap-2 max-w-[200px]">
+                        <div className="flex-1 h-1 rounded-full bg-muted/30 overflow-hidden">
+                          <div className={`h-full w-[55%] rounded-full bg-brand/15 ${pulse}`} />
+                        </div>
+                      </div>
+                    </div>
+                    <div className={`h-4 w-4 rounded bg-muted/35 shrink-0 ${pulse}`} />
+                  </div>
+                  <div className="px-5 py-3 space-y-0 divide-y divide-border/35">
+                    {[0, 1, 2].map((row) => (
+                      <div key={row} className="flex items-start gap-3 py-3 first:pt-2">
+                        <div className={`mt-0.5 h-[18px] w-[18px] shrink-0 rounded border border-border/50 bg-muted/25 ${pulse}`} />
+                        <div className="flex-1 min-w-0 space-y-2 pt-0.5">
+                          <div
+                            className={cn(
+                              "h-3.5 rounded bg-muted/42 max-w-full",
+                              pulse,
+                              row === 0 && "w-[88%]",
+                              row === 1 && "w-[72%]",
+                              row === 2 && "w-[80%]",
+                            )}
+                          />
+                          <div className={`h-3 w-[58%] rounded bg-muted/28 ${pulse}`} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-center text-[11px] text-muted-foreground/70 pt-2">
+              Syncing your plan…
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function PlanView({ goalId, onBack }: PlanViewProps) {
   const user = auth.currentUser
   const navigate = useNavigate()
@@ -31,6 +147,7 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
   const [readingFocusMode, setReadingFocusMode] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
+  const [celebrateOpen, setCelebrateOpen] = useState(false)
 
   useEffect(() => {
     if (!activeChat) setReadingFocusMode(false)
@@ -46,7 +163,16 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
     if (!user || !goal) return
     setUpdating(true)
     try {
-      await updateTaskCompletion(user.uid, goalId, phaseIndex, taskIndex, completed)
+      const { goalJustCompleted } = await updateTaskCompletion(
+        user.uid,
+        goalId,
+        phaseIndex,
+        taskIndex,
+        completed,
+      )
+      if (goalJustCompleted) {
+        setCelebrateOpen(true)
+      }
       if (completed) {
         const t = goal.phases[phaseIndex]?.tasks[taskIndex]
         if (t) {
@@ -81,13 +207,7 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
   }
 
   if (loading) {
-    return (
-      <div className="px-4 pt-8 space-y-4">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="h-20 rounded-3xl bg-muted/50 animate-pulse" />
-        ))}
-      </div>
-    )
+    return <PlanLoadingSkeleton onBack={onBack} />
   }
 
   if (error || !goal) {
@@ -112,6 +232,7 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
   const totalTasks = goal.phases.reduce((a, p) => a + p.tasks.length, 0)
   const doneTasks = goal.phases.reduce((a, p) => a + p.tasks.filter((t) => t.completed).length, 0)
   const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0
+  const journeyComplete = isGoalCompleted(goal)
 
   async function handleConfirmDelete() {
     if (!user) return
@@ -175,10 +296,24 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
                 </button>
               </div>
 
+              {journeyComplete && (
+                <div className="rounded-2xl border border-brand/25 bg-linear-to-br from-brand-muted/50 to-transparent px-4 py-3.5 space-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-brand/90">
+                    Journey complete
+                  </p>
+                  <p className="text-sm text-foreground/90 leading-snug">
+                    This path is closed — not forgotten. Reopen any task to revisit what you learned;
+                    your notes and chats stay here as a map you already walked.
+                  </p>
+                </div>
+              )}
+
               {/* Progress */}
               <div className="bg-card rounded-2xl border p-4 space-y-3">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Overall progress</span>
+                  <span className="text-muted-foreground">
+                    {journeyComplete ? "You finished every step" : "Overall progress"}
+                  </span>
                   <span className="font-bold">{doneTasks}/{totalTasks} tasks</span>
                 </div>
                 <div className="h-2.5 w-full bg-muted rounded-full overflow-hidden">
@@ -294,6 +429,13 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
         goalTitle={goal.title}
         onConfirm={handleConfirmDelete}
         isDeleting={deleteBusy}
+      />
+
+      <GoalCompleteCelebration
+        open={celebrateOpen}
+        onOpenChange={setCelebrateOpen}
+        goalTitle={goal.title}
+        onViewGoals={() => navigate({ to: "/goals" })}
       />
     </div>
   )

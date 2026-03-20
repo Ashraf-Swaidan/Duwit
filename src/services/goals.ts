@@ -6,14 +6,15 @@ import { parseTaskTeachingPersist } from "@/services/taskTeaching"
 export type { LessonStep } from "@/types/curriculum"
 import {
   collection,
+  deleteDoc,
+  deleteField,
   doc,
-  setDoc,
   getDoc,
   getDocs,
   query,
+  setDoc,
   where,
   writeBatch,
-  deleteDoc,
 } from "firebase/firestore"
 
 export interface Task {
@@ -127,6 +128,16 @@ export async function getUserGoals(uid: string): Promise<Goal[]> {
   })) as Goal[]
 }
 
+/** True when the goal is marked completed or every task in the plan is done (covers older docs). */
+export function isGoalCompleted(goal: Pick<Goal, "status" | "phases">): boolean {
+  if (goal.status === "completed") return true
+  const phases = goal.phases ?? []
+  const total = phases.reduce((acc, p) => acc + p.tasks.length, 0)
+  if (total === 0) return false
+  const done = phases.reduce((acc, p) => acc + p.tasks.filter((t) => t.completed).length, 0)
+  return done === total
+}
+
 export async function updateGoalProgress(uid: string, goalId: string, progress: number): Promise<void> {
   const docRef = doc(db, "users", uid, "goals", goalId)
   await setDoc(docRef, { progress }, { merge: true })
@@ -231,26 +242,47 @@ export async function updateTaskCompletion(
   phaseIndex: number,
   taskIndex: number,
   completed: boolean,
-): Promise<void> {
+): Promise<{ goalJustCompleted: boolean }> {
   const docRef = doc(db, "users", uid, "goals", goalId)
   const snap = await getDoc(docRef)
 
   if (!snap.exists()) throw new Error("Goal not found")
 
   const data = snap.data() as Goal
-  if (data.phases[phaseIndex] && data.phases[phaseIndex].tasks[taskIndex]) {
-    data.phases[phaseIndex].tasks[taskIndex].completed = completed
-    if (completed) {
-      data.phases[phaseIndex].tasks[taskIndex].completedAt = new Date().toISOString()
-    }
-
-    const totalTasks = data.phases.reduce((acc, p) => acc + p.tasks.length, 0)
-    const completedTasks = data.phases.reduce(
-      (acc, p) => acc + p.tasks.filter((t) => t.completed).length,
-      0,
-    )
-    const newProgress = Math.round((completedTasks / totalTasks) * 100)
-
-    await setDoc(docRef, { phases: data.phases, progress: newProgress }, { merge: true })
+  if (!data.phases?.[phaseIndex]?.tasks?.[taskIndex]) {
+    return { goalJustCompleted: false }
   }
+
+  data.phases[phaseIndex].tasks[taskIndex].completed = completed
+  if (completed) {
+    data.phases[phaseIndex].tasks[taskIndex].completedAt = new Date().toISOString()
+  } else {
+    delete data.phases[phaseIndex].tasks[taskIndex].completedAt
+  }
+
+  const totalTasks = data.phases.reduce((acc, p) => acc + p.tasks.length, 0)
+  const completedTasks = data.phases.reduce(
+    (acc, p) => acc + p.tasks.filter((t) => t.completed).length,
+    0,
+  )
+  const newProgress =
+    totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
+  const allDone = totalTasks > 0 && completedTasks === totalTasks
+  const goalJustCompleted = completed && allDone
+
+  const payload: Record<string, unknown> = {
+    phases: data.phases,
+    progress: newProgress,
+  }
+
+  if (allDone) {
+    payload.status = "completed" as const
+    payload.completedAt = new Date().toISOString()
+  } else {
+    payload.status = "active" as const
+    payload.completedAt = deleteField()
+  }
+
+  await setDoc(docRef, payload, { merge: true })
+  return { goalJustCompleted }
 }

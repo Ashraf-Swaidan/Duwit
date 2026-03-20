@@ -10,7 +10,9 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as NewGoalRouteImport } from './routes/new-goal'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as GoalsRouteImport } from './routes/goals'
+import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PlanGoalIdRouteImport } from './routes/plan.$goalId'
 
@@ -19,9 +21,19 @@ const NewGoalRoute = NewGoalRouteImport.update({
   path: '/new-goal',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const GoalsRoute = GoalsRouteImport.update({
   id: '/goals',
   path: '/goals',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppRoute = AppRouteImport.update({
+  id: '/app',
+  path: '/app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -37,34 +49,49 @@ const PlanGoalIdRoute = PlanGoalIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/app': typeof AppRoute
   '/goals': typeof GoalsRoute
+  '/login': typeof LoginRoute
   '/new-goal': typeof NewGoalRoute
   '/plan/$goalId': typeof PlanGoalIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/app': typeof AppRoute
   '/goals': typeof GoalsRoute
+  '/login': typeof LoginRoute
   '/new-goal': typeof NewGoalRoute
   '/plan/$goalId': typeof PlanGoalIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/app': typeof AppRoute
   '/goals': typeof GoalsRoute
+  '/login': typeof LoginRoute
   '/new-goal': typeof NewGoalRoute
   '/plan/$goalId': typeof PlanGoalIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/goals' | '/new-goal' | '/plan/$goalId'
+  fullPaths: '/' | '/app' | '/goals' | '/login' | '/new-goal' | '/plan/$goalId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/goals' | '/new-goal' | '/plan/$goalId'
-  id: '__root__' | '/' | '/goals' | '/new-goal' | '/plan/$goalId'
+  to: '/' | '/app' | '/goals' | '/login' | '/new-goal' | '/plan/$goalId'
+  id:
+    | '__root__'
+    | '/'
+    | '/app'
+    | '/goals'
+    | '/login'
+    | '/new-goal'
+    | '/plan/$goalId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRoute
   GoalsRoute: typeof GoalsRoute
+  LoginRoute: typeof LoginRoute
   NewGoalRoute: typeof NewGoalRoute
   PlanGoalIdRoute: typeof PlanGoalIdRoute
 }
@@ -78,11 +105,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NewGoalRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/goals': {
       id: '/goals'
       path: '/goals'
       fullPath: '/goals'
       preLoaderRoute: typeof GoalsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app': {
+      id: '/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -104,7 +145,9 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AppRoute: AppRoute,
   GoalsRoute: GoalsRoute,
+  LoginRoute: LoginRoute,
   NewGoalRoute: NewGoalRoute,
   PlanGoalIdRoute: PlanGoalIdRoute,
 }
