@@ -40,6 +40,8 @@ export function ProfileDialogProvider({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [profileLoading, setProfileLoading] = useState(false)
+  /** False until the first getUserProfile for this session completes — avoids treating null as "no profile" before Firestore returns. */
+  const [initialProfileResolved, setInitialProfileResolved] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogMode, setDialogMode] = useState<"onboarding" | "edit">("onboarding")
 
@@ -56,6 +58,7 @@ export function ProfileDialogProvider({ children }: { children: ReactNode }) {
       setProfile(null)
     } finally {
       setProfileLoading(false)
+      setInitialProfileResolved(true)
     }
   }, [user])
 
@@ -63,18 +66,20 @@ export function ProfileDialogProvider({ children }: { children: ReactNode }) {
     if (authLoading) return
     if (!user) {
       setProfile(null)
+      setInitialProfileResolved(false)
       return
     }
+    setInitialProfileResolved(false)
     void refreshProfile()
   }, [user, authLoading, refreshProfile])
 
   useEffect(() => {
-    if (!user || authLoading || profileLoading) return
+    if (!user || authLoading || profileLoading || !initialProfileResolved) return
     if (!isProtectedPath(pathname)) return
     if (!shouldShowProfileOnboarding(profile)) return
     setDialogMode("onboarding")
     setDialogOpen(true)
-  }, [user, authLoading, profileLoading, profile, pathname])
+  }, [user, authLoading, profileLoading, initialProfileResolved, profile, pathname])
 
   const openPreferencesEditor = useCallback(() => {
     setDialogMode("edit")

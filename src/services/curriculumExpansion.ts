@@ -1,7 +1,9 @@
-import type { Goal, Task } from "@/services/goals"
+import type { Goal, GoalProfile, Task } from "@/services/goals"
 import { generateTeachingPlan } from "@/services/taskTeaching"
 import { validateLessonStepsForTask, validatePlanCurriculum } from "@/services/curriculumValidation"
 import type { LessonStep } from "@/types/curriculum"
+import type { UserProfile } from "@/services/user"
+import { buildTeachingLearnerContext } from "@/services/user"
 
 const CONCURRENCY = 3
 const MAX_ATTEMPTS = 3
@@ -36,6 +38,7 @@ async function expandOneTask(
   goalTitle: string,
   job: ExpansionJob,
   modelName?: string,
+  learnerContext?: string,
 ): Promise<LessonStep[]> {
   let lastErr: Error | null = null
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -46,6 +49,7 @@ async function expandOneTask(
         job.task,
         modelName,
         job.siblingTitles,
+        learnerContext,
       )
       const probe: Task = { ...job.task, lessonSteps: steps }
       const errs = validateLessonStepsForTask(probe, "expanded")
@@ -80,11 +84,18 @@ async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, index: num
  * Fills `lessonSteps` on every task. Throws if any task fails after retries.
  * Caller should run `validatePlanCurriculum` before save; this function runs it at the end.
  */
+export type ExpandCurriculumOptions = {
+  userProfile?: UserProfile | null
+  goalProfile?: GoalProfile
+}
+
 export async function expandCurriculumForPlan(
   goalDraft: Goal,
   modelName?: string,
   onProgress?: (done: number, total: number) => void,
+  options?: ExpandCurriculumOptions,
 ): Promise<Goal> {
+  const learnerContext = buildTeachingLearnerContext(options?.userProfile, options?.goalProfile)
   const jobs = collectJobs(goalDraft)
   const total = jobs.length
   if (total === 0) {
@@ -98,7 +109,7 @@ export async function expandCurriculumForPlan(
   report()
 
   const lessonResults = await mapPool(jobs, CONCURRENCY, async (job, _i) => {
-    const steps = await expandOneTask(goalDraft.title, job, modelName)
+    const steps = await expandOneTask(goalDraft.title, job, modelName, learnerContext)
     completed++
     report()
     return { phaseIndex: job.phaseIndex, taskIndex: job.taskIndex, steps }

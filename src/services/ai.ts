@@ -172,10 +172,6 @@ export async function callAIStream({
     }
   }
 
-  if (enableWebSearch) {
-    onStreamProgress?.({ type: "phase", phase: "searching" })
-  }
-
   let full = ""
   let grounding: WebGroundingInfo | null = null
   let sawText = false
@@ -186,6 +182,15 @@ export async function callAIStream({
     if (parsed) {
       grounding = mergeWebGrounding(grounding, parsed)
       onStreamProgress?.({ type: "grounding", data: grounding })
+      // Only show "searching" in the UI when the API actually returned web-grounding data —
+      // do not imply a search on every request with tools enabled.
+      if (
+        enableWebSearch &&
+        !sawText &&
+        (parsed.webSearchQueries.length > 0 || parsed.sources.length > 0)
+      ) {
+        onStreamProgress?.({ type: "phase", phase: "searching" })
+      }
     }
 
     const piece = chunk.text()

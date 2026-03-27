@@ -128,14 +128,23 @@ export function TaskItem({
           </p>
         )}
 
-        <span className="text-xs text-muted-foreground">
-          {task.estimatedDays} {task.estimatedDays === 1 ? "day" : "days"}
-          {task.completedAt && (
-            <span className="ml-2 text-brand font-medium">
-              · done {new Date(task.completedAt).toLocaleDateString()}
-            </span>
-          )}
-        </span>
+        {(typeof task.estimatedDays === "number" || task.completedAt) && (
+          <span className="text-xs text-muted-foreground">
+            {typeof task.estimatedDays === "number" && (
+              <>
+                {task.estimatedDays} {task.estimatedDays === 1 ? "day" : "days"}
+              </>
+            )}
+            {task.completedAt && (
+              <span
+                className={`text-brand font-medium ${typeof task.estimatedDays === "number" ? "ml-2" : ""}`}
+              >
+                {typeof task.estimatedDays === "number" ? "· " : ""}done{" "}
+                {new Date(task.completedAt).toLocaleDateString()}
+              </span>
+            )}
+          </span>
+        )}
       </div>
     </div>
   )

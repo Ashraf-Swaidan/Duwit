@@ -13,6 +13,7 @@ import {
   buildGoalStateTaskDonePrompt,
 } from "@/services/prompts"
 import type { QuizResult } from "@/services/taskTeaching"
+import { formatUserProfileForPrompt, type UserProfile } from "@/services/user"
 
 const MAX_OUTCOMES = 12
 const COMPRESS_USER_MESSAGE_INTERVAL = 8
@@ -95,14 +96,17 @@ export async function recordQuizInGoalState(
   taskTitle: string,
   result: QuizResult,
   modelName?: string,
+  userProfile?: UserProfile | null,
 ): Promise<void> {
   const goal = await loadGoal(uid, goalId)
   if (!goal) return
 
   const prev = goal.goalState
+  const userProfileBlock = formatUserProfileForPrompt(userProfile)
   const prompt = buildGoalStateQuizMergePrompt({
     goalTitle,
     profile,
+    userProfileBlock: userProfileBlock || undefined,
     priorSummary: prev?.workingSummary ?? "",
     priorOutcomes: prev?.taskOutcomes ?? [],
     phaseIndex,
@@ -166,11 +170,13 @@ export async function recordTaskMarkedCompleteInGoalState(
   taskIndex: number,
   taskTitle: string,
   modelName?: string,
+  userProfile?: UserProfile | null,
 ): Promise<void> {
   const goal = await loadGoal(uid, goalId)
   if (!goal) return
 
   const prev = goal.goalState
+  const userProfileBlock = formatUserProfileForPrompt(userProfile)
   const recentSame = prev?.taskOutcomes?.find(
     (o) => o.phaseIndex === phaseIndex && o.taskIndex === taskIndex,
   )
@@ -184,6 +190,7 @@ export async function recordTaskMarkedCompleteInGoalState(
   const prompt = buildGoalStateTaskDonePrompt({
     goalTitle,
     profile,
+    userProfileBlock: userProfileBlock || undefined,
     priorSummary: prev?.workingSummary ?? "",
     phaseIndex,
     taskIndex,
@@ -236,6 +243,7 @@ export async function maybeCompressTaskChatIntoGoalState(
   taskTitle: string,
   messages: ChatMessage[],
   modelName?: string,
+  userProfile?: UserProfile | null,
 ): Promise<boolean> {
   const userTurns = messages.filter((m) => m.role === "user").length
   if (userTurns === 0 || userTurns % COMPRESS_USER_MESSAGE_INTERVAL !== 0) return false
@@ -244,6 +252,7 @@ export async function maybeCompressTaskChatIntoGoalState(
   if (!goal) return false
 
   const prev = goal.goalState
+  const userProfileBlock = formatUserProfileForPrompt(userProfile)
   const recent = messages.slice(-16)
   const excerpt = recent
     .map((m) => `${m.role === "user" ? "Student" : "Teacher"}: ${m.content}`)
@@ -253,6 +262,7 @@ export async function maybeCompressTaskChatIntoGoalState(
   const prompt = buildGoalStateCompressPrompt({
     goalTitle,
     profile,
+    userProfileBlock: userProfileBlock || undefined,
     taskTitle,
     phaseIndex,
     taskIndex,

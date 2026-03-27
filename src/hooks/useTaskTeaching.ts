@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react"
-import type { Task, ChatMessage } from "@/services/goals"
+import type { Task, ChatMessage, GoalProfile } from "@/services/goals"
+import type { UserProfile } from "@/services/user"
+import { buildTeachingLearnerContext } from "@/services/user"
 import { validateLessonStepsForTask } from "@/services/curriculumValidation"
 import {
   type TeachingState,
@@ -34,6 +36,8 @@ interface UseTaskTeachingOptions {
   taskScopeKey: string
   /** Titles of other tasks in the same plan phase — excluded from micro-curriculum focus */
   siblingTaskTitles?: string[]
+  userProfile?: UserProfile | null
+  goalProfile?: GoalProfile
 }
 
 export interface UseTaskTeachingReturn {
@@ -87,7 +91,13 @@ export function useTaskTeaching({
   sessionKey,
   taskScopeKey,
   siblingTaskTitles,
+  userProfile,
+  goalProfile,
 }: UseTaskTeachingOptions): UseTaskTeachingReturn {
+  const teachingLearnerContext = useMemo(
+    () => buildTeachingLearnerContext(userProfile, goalProfile),
+    [userProfile, goalProfile],
+  )
   const [teachingState, setTeachingState] = useState<TeachingState | null>(null)
   const [phases, setPhases] = useState<TeachingPhase[]>([])
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(0)
@@ -219,6 +229,7 @@ export function useTaskTeaching({
         task,
         selectedModel,
         siblingTaskTitles,
+        teachingLearnerContext,
       )
         .then((plan) => {
           setPhases(plan)
@@ -240,6 +251,7 @@ export function useTaskTeaching({
       task,
       selectedModel,
       siblingTaskTitles,
+      teachingLearnerContext,
     )
       .then((plan) => {
         setPhases(plan)
@@ -265,6 +277,7 @@ export function useTaskTeaching({
     selectedModel,
     siblingTaskTitles,
     lessonStepsFingerprint,
+    teachingLearnerContext,
   ])
 
   const currentPhase = phases[currentPhaseIndex] ?? null

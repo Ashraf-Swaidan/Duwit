@@ -3,8 +3,12 @@ import { ArrowLeft, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { auth } from "@/lib/firebase"
 import { callAIStructured } from "@/services/ai"
-import { generatePlanPrompt, PLAN_GENERATION_SYSTEM_PROMPT } from "@/services/prompts"
-import { createGoal, type Goal } from "@/services/goals"
+import {
+  generatePlanPrompt,
+  PLAN_GENERATION_SYSTEM_PROMPT,
+  generateQuickGoalProfilePrompt,
+} from "@/services/prompts"
+import { createGoal, type Goal, type GoalProfile } from "@/services/goals"
 import { expandCurriculumForPlan } from "@/services/curriculumExpansion"
 import { useModel } from "@/contexts/ModelContext"
 import { formatUserProfileForPrompt } from "@/services/user"
@@ -15,21 +19,12 @@ interface NewGoalProps {
   onBack?: () => void
 }
 
-const TIME_OPTIONS = [
-  { label: "15 min", value: "15 minutes" },
-  { label: "30 min", value: "30 minutes" },
-  { label: "1 hour", value: "1 hour" },
-  { label: "2 hours", value: "2 hours" },
-  { label: "3+ hours", value: "3+ hours" },
-]
-
 export function NewGoal({ onSuccess, onBack }: NewGoalProps) {
   const user = auth.currentUser
   const { selectedModel } = useModel()
   const { profile: userProfile } = useProfileDialog()
 
   const [goal, setGoal] = useState("")
-  const [timePerDay, setTimePerDay] = useState("30 minutes")
   const [loading, setLoading] = useState(false)
   const [planStage, setPlanStage] = useState<"outline" | "lessons" | null>(null)
   const [lessonProgress, setLessonProgress] = useState({ done: 0, total: 0 })
@@ -51,7 +46,7 @@ export function NewGoal({ onSuccess, onBack }: NewGoalProps) {
 
     let stage: "outline" | "lessons" = "outline"
     try {
-      const prompt = generatePlanPrompt(goal, timePerDay)
+      const prompt = generatePlanPrompt(goal)
       const planBlock = formatUserProfileForPrompt(userProfile)
       const planSystemPrompt = planBlock
         ? `${PLAN_GENERATION_SYSTEM_PROMPT}\n\n${planBlock}`
@@ -64,12 +59,39 @@ export function NewGoal({ onSuccess, onBack }: NewGoalProps) {
         modelName: selectedModel,
       })
 
-      const skeleton = plan as Goal
+      const profileBlock = formatUserProfileForPrompt(userProfile)
+      const quickProfileSystem = profileBlock
+        ? `You extract JSON only for a per-goal coach profile. No markdown, no commentary.\n\n${profileBlock}`
+        : `You extract JSON only for a per-goal coach profile. No markdown, no commentary.`
+
+      let profile: GoalProfile | undefined
+      try {
+        profile = await callAIStructured<GoalProfile>({
+          prompt: generateQuickGoalProfilePrompt(goal),
+          systemPrompt: quickProfileSystem,
+          temperature: 0.1,
+          maxOutputTokens: 600,
+          modelName: selectedModel,
+        })
+      } catch {
+        profile = undefined
+      }
+
+      const skeleton: Goal = {
+        ...(plan as Goal),
+        profile,
+      }
+
       stage = "lessons"
       setPlanStage("lessons")
-      const expanded = await expandCurriculumForPlan(skeleton, selectedModel, (done, total) => {
-        setLessonProgress({ done, total })
-      })
+      const expanded = await expandCurriculumForPlan(
+        skeleton,
+        selectedModel,
+        (done, total) => {
+          setLessonProgress({ done, total })
+        },
+        { userProfile, goalProfile: profile },
+      )
 
       const goalId = await createGoal(user.uid, expanded)
       onSuccess?.(goalId)
@@ -125,27 +147,6 @@ export function NewGoal({ onSuccess, onBack }: NewGoalProps) {
           />
         </div>
 
-        {/* Time commitment */}
-        <div className="space-y-3">
-          <p className="text-sm font-semibold">How much time can you commit daily?</p>
-          <div className="flex flex-wrap gap-2">
-            {TIME_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setTimePerDay(opt.value)}
-                disabled={loading}
-                className={`px-4 py-2 rounded-full text-sm font-medium border transition-all duration-150 ${
-                  timePerDay === opt.value
-                    ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                    : "bg-card border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {error && (
           <div className="rounded-2xl bg-destructive/10 border border-destructive/20 px-4 py-3">
             <p className="text-sm text-destructive">{error}</p>
@@ -178,7 +179,7 @@ export function NewGoal({ onSuccess, onBack }: NewGoalProps) {
         </Button>
 
         <p className="text-center text-xs text-muted-foreground">
-          AI will create a structured plan with phases and tasks tailored to your schedule.
+          AI will build a roadmap of phases and tasks aligned with your preferences.
         </p>
       </div>
     </div>

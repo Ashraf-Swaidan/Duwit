@@ -21,7 +21,8 @@ export interface Task {
   title: string
   description: string
   type: "learn" | "build" | "practice" | "project" | "review"
-  estimatedDays: number
+  /** @deprecated Legacy plans only; not generated for new goals. */
+  estimatedDays?: number
   completed?: boolean
   completedAt?: string
   /** Stored micro-curriculum for this checklist task (3 lesson steps). */
@@ -37,8 +38,6 @@ export interface Phase {
 export interface GoalProfile {
   // High-level sense of where they are starting from
   experienceLevel: "beginner" | "intermediate" | "advanced"
-  // Free-form description like "30 minutes", "1–2 hours", etc.
-  timePerDay: string
   // Why they care about this goal
   motivation: string
   // What success looks like in their own words

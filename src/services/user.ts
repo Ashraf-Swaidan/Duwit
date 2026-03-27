@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
+import type { GoalProfile } from "@/services/goals"
 
 /** Bump when adding new preference fields so migrations can run later if needed */
 export const USER_PROFILE_VERSION = 1
@@ -134,4 +135,27 @@ export function formatUserProfileForPrompt(profile: UserProfile | null | undefin
   }
   if (lines.length === 0) return ""
   return `Learner profile (honor consistently — adapt explanations, pacing, and tone):\n${lines.join("\n")}`
+}
+
+/** Compact per-goal lines for curriculum / teaching-plan prompts. */
+export function formatGoalProfileForTeaching(profile: GoalProfile | null | undefined): string {
+  if (!profile) return ""
+  const parts: string[] = []
+  parts.push(`- Experience level: ${profile.experienceLevel}`)
+  if (profile.successDefinition?.trim()) parts.push(`- What success looks like: ${profile.successDefinition.trim()}`)
+  if (profile.motivation?.trim()) parts.push(`- Motivation: ${profile.motivation.trim()}`)
+  if (profile.notes?.trim()) parts.push(`- Notes: ${profile.notes.trim()}`)
+  if (parts.length === 0) return ""
+  return `Goal-specific learner context:\n${parts.join("\n")}`
+}
+
+/** Combined global + per-goal context for micro-curriculum generation (user message append). */
+export function buildTeachingLearnerContext(
+  userProfile: UserProfile | null | undefined,
+  goalProfile: GoalProfile | undefined,
+): string {
+  const u = formatUserProfileForPrompt(userProfile)
+  const g = formatGoalProfileForTeaching(goalProfile)
+  if (!u && !g) return ""
+  return [u, g].filter(Boolean).join("\n\n")
 }

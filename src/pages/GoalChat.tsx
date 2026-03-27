@@ -147,9 +147,14 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
       // 2) Distill a reusable per-goal profile (\"memory\") from the same conversation
       const profilePrompt = generateGoalProfilePrompt(messages)
       let profile: GoalProfile | undefined
+      const profileSysBlock = formatUserProfileForPrompt(userProfile)
+      const profileSystemPrompt = profileSysBlock
+        ? `You extract JSON only for a per-goal coach profile. No markdown, no commentary.\n\n${profileSysBlock}`
+        : `You extract JSON only for a per-goal coach profile. No markdown, no commentary.`
       try {
         profile = await callAIStructured<GoalProfile>({
           prompt: profilePrompt,
+          systemPrompt: profileSystemPrompt,
           temperature: 0.1,
           maxOutputTokens: 600,
           modelName: selectedModel,
@@ -165,9 +170,14 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
 
       step = "lessons"
       setGenerationStep("lessons")
-      const expanded = await expandCurriculumForPlan(skeleton, selectedModel, (done, total) => {
-        setLessonProgress({ done, total })
-      })
+      const expanded = await expandCurriculumForPlan(
+        skeleton,
+        selectedModel,
+        (done, total) => {
+          setLessonProgress({ done, total })
+        },
+        { userProfile, goalProfile: profile },
+      )
 
       const goalId = await createGoal(user.uid, expanded)
       onSuccess(goalId)

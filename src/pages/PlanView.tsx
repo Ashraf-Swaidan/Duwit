@@ -14,6 +14,7 @@ import {
 } from "@/services/goals"
 import { recordTaskMarkedCompleteInGoalState } from "@/services/goalState"
 import { notifyHomeGoalsChanged } from "@/services/userContext"
+import { useProfileDialog } from "@/contexts/ProfileDialogContext"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 
@@ -140,6 +141,7 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
   const user = auth.currentUser
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { profile: userProfile } = useProfileDialog()
   const [updating, setUpdating] = useState(false)
   const [activeChat, setActiveChat] = useState<ActiveChat | null>(null)
   const [readingFocusMode, setReadingFocusMode] = useState(false)
@@ -189,6 +191,8 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
             phaseIndex,
             taskIndex,
             t.title,
+            undefined,
+            userProfile,
           )
             .then(() => queryClient.invalidateQueries({ queryKey: ["goal", goalId] }))
             .catch(() => {})

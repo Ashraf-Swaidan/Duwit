@@ -195,6 +195,8 @@ export function TaskChat({
     sessionKey,
     taskScopeKey,
     siblingTaskTitles: siblingRoadmapTitles,
+    userProfile,
+    goalProfile,
   })
 
   const handleChecklistChange = useCallback(
@@ -307,6 +309,7 @@ export function TaskChat({
       task.title,
       r,
       selectedModel,
+      userProfile,
     )
       .then(() => onGoalStateUpdated?.())
       .catch(() => {})
@@ -320,6 +323,7 @@ export function TaskChat({
     task.title,
     selectedModel,
     onGoalStateUpdated,
+    userProfile,
   ])
 
   useEffect(() => {
@@ -461,7 +465,6 @@ export function TaskChat({
     if (goalProfile) {
       lines.push("", "Goal-specific profile (detail):")
       lines.push(`- Experience level: ${goalProfile.experienceLevel}`)
-      lines.push(`- Time per day: ${goalProfile.timePerDay}`)
       if (goalProfile.notes) lines.push(`- Notes: ${goalProfile.notes}`)
     }
     if (phaseTasks.length > 0) {
@@ -579,7 +582,6 @@ export function TaskChat({
       setMessages([...updated, { role: "assistant", content: "" }])
 
       let accumulated = ""
-      setWebSearchStreamPhase("searching")
       const { text: response, grounding: responseGrounding } = await callAIStream({
         prompt: history,
         systemPrompt,
@@ -643,6 +645,7 @@ export function TaskChat({
           task.title,
           final,
           selectedModel,
+          userProfile,
         )
           .then((did) => {
             if (did) onGoalStateUpdated?.()
@@ -1115,10 +1118,15 @@ export function TaskChat({
                           <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" aria-hidden />
                           <span>Searching the web…</span>
                         </>
-                      ) : (
+                      ) : webSearchStreamPhase === "writing" ? (
                         <>
                           <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0 opacity-70" aria-hidden />
                           <span>Composing answer…</span>
+                        </>
+                      ) : (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0 opacity-70" aria-hidden />
+                          <span>Thinking…</span>
                         </>
                       )}
                     </div>
