@@ -1,14 +1,14 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
-import { InteractiveLandingPage } from '@/pages/InteractiveLandingPage'
+import { LandingPage } from '@/pages/LandingPage'
 import { useAuth } from '@/hooks/useAuth'
 
-export const Route = createFileRoute('/')({
-  component: IndexRoute,
+export const Route = createFileRoute('/classic')({
+  component: ClassicLandingRoute,
 })
 
-function IndexRoute() {
+function ClassicLandingRoute() {
   const { user, loading } = useAuth()
   const navigate = useNavigate()
 
@@ -29,5 +29,5 @@ function IndexRoute() {
 
   if (user) return null
 
-  return <InteractiveLandingPage />
+  return <LandingPage />
 }
