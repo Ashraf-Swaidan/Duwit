@@ -17,6 +17,12 @@ import {
   Copy,
   Check,
   ListChecks,
+  Volume2,
+  Phone,
+  Loader2,
+  Pause,
+  Play,
+  Square,
 } from "lucide-react"
 import type { Task, ChatMessage, GoalProfile, GoalState } from "@/services/goals"
 import { saveTaskChat, loadTaskChatDocument } from "@/services/goals"
@@ -35,6 +41,9 @@ import { Markdown } from "@/components/Markdown"
 import { getUserProfile, type UserProfile } from "@/services/user"
 import { useTaskTeaching } from "@/hooks/useTaskTeaching"
 import { parseWidgets } from "@/lib/parseWidgets"
+import { paragraphsForSpeech } from "@/lib/plainTextForSpeech"
+import { speakWithBrowserTts, startGeminiTtsPlayback, type GeminiTtsHandle } from "@/services/geminiTts"
+import { TaskVoiceCallPanel } from "@/components/TaskVoiceCallPanel"
 
 interface TaskChatProps {
   task: Task
@@ -104,6 +113,15 @@ export function TaskChat({
   const prevLengthRef = useRef(0)
   const quizGoalStateRecordedRef = useRef<string | null>(null)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [autoReadAloud, setAutoReadAloud] = useState(false)
+  const [voicePanelOpen, setVoicePanelOpen] = useState(false)
+  const [voiceInstruction, setVoiceInstruction] = useState("")
+  /** One TTS session at a time: loading until first audio, then playing/paused until done or cancel. */
+  const [ttsSession, setTtsSession] = useState<
+    null | { index: number; phase: "loading" | "playing" | "paused" }
+  >(null)
+  const ttsHandleRef = useRef<GeminiTtsHandle | null>(null)
+  const ttsUserCancelledRef = useRef(false)
 
   const taskScopeKey = `${goalId}-${phaseIndex}-${taskIndex}`
   const siblingRoadmapTitles = phaseTasks
@@ -128,6 +146,21 @@ export function TaskChat({
     (messageIndex: number, slot: number, indices: number[]) => {
       const key = `${messageIndex}-${slot}`
       setChecklistSelections((prev) => ({ ...prev, [key]: indices }))
+    },
+    [],
+  )
+
+  const handleVoiceTranscriptDelta = useCallback(
+    (evt: { role: "user" | "assistant"; text: string }) => {
+      const { role, text } = evt
+      if (!text) return
+      setMessages((prev) => {
+        const last = prev[prev.length - 1]
+        if (last && last.role === role) {
+          return [...prev.slice(0, -1), { role, content: last.content + text }]
+        }
+        return [...prev, { role, content: text }]
+      })
     },
     [],
   )
@@ -242,6 +275,7 @@ export function TaskChat({
 
   useEffect(() => {
     const uid = auth.currentUser?.uid
+    let cancelled = false
     setChatHydrationReady(false)
     setLoadedPersist(null)
     if (!uid) {
@@ -252,6 +286,7 @@ export function TaskChat({
     setLoadingHistory(true)
     loadTaskChatDocument(uid, goalId, phaseIndex, taskIndex)
       .then(({ messages: saved, teachingPersist }) => {
+        if (cancelled) return
         const nextMeta: Record<number, { youtubeSearches: string[]; channels: string[] }> = {}
         const cleaned = saved.map((m, idx) => {
           if (m.role !== "assistant") return m
@@ -266,9 +301,13 @@ export function TaskChat({
       })
       .catch(() => {})
       .finally(() => {
+        if (cancelled) return
         setLoadingHistory(false)
         setChatHydrationReady(true)
       })
+    return () => {
+      cancelled = true
+    }
   }, [goalId, phaseIndex, taskIndex])
 
   // Persist messages + teaching snapshot. Never skip messages while plan is generating:
@@ -317,6 +356,12 @@ export function TaskChat({
     }
   }, [loadingHistory])
 
+  useEffect(() => {
+    if (!voicePanelOpen) {
+      requestAnimationFrame(() => inputRef.current?.focus())
+    }
+  }, [voicePanelOpen])
+
   // Close on Escape
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -325,6 +370,124 @@ export function TaskChat({
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [onClose])
+
+  useEffect(() => {
+    return () => {
+      ttsHandleRef.current?.cancel()
+      ttsHandleRef.current = null
+    }
+  }, [])
+
+  function buildCoachSystemPrompt(): string {
+    const storedLessonObjectives =
+      task.lessonSteps?.length &&
+      teaching.teachingState === "teaching" &&
+      task.lessonSteps[teaching.currentPhaseIndex]
+        ? task.lessonSteps[teaching.currentPhaseIndex].objectives
+        : undefined
+
+    let systemPrompt = generateTaskGuideSystemPrompt(
+      goalTitle,
+      phaseTitle,
+      task,
+      teaching.teachingContext,
+      {
+        goalState: goalState ?? undefined,
+        goalProfile: goalProfile ?? undefined,
+        focusMode,
+        planPhaseIndex: phaseIndex,
+        planTaskIndex: taskIndex,
+        siblingRoadmapTaskTitles: siblingRoadmapTitles,
+        inChatPhaseTitles:
+          teaching.phases.length > 0
+            ? teaching.phases.map((p) => p.title)
+            : undefined,
+        storedLessonObjectives,
+      },
+    )
+
+    const lines: string[] = []
+    if (userProfile && (userProfile.nickname || userProfile.preferredLanguage || userProfile.preferredLearningStyle)) {
+      lines.push("User profile:")
+      if (userProfile.nickname) lines.push(`- Nickname: ${userProfile.nickname}`)
+      if (userProfile.preferredLanguage) lines.push(`- Preferred language: ${userProfile.preferredLanguage}`)
+      if (userProfile.preferredLearningStyle) lines.push(`- Learning style: ${userProfile.preferredLearningStyle}`)
+      if (userProfile.preferredTone) lines.push(`- Tone: ${userProfile.preferredTone}`)
+    }
+    if (goalProfile) {
+      lines.push("", "Goal-specific profile (detail):")
+      lines.push(`- Experience level: ${goalProfile.experienceLevel}`)
+      lines.push(`- Time per day: ${goalProfile.timePerDay}`)
+      if (goalProfile.notes) lines.push(`- Notes: ${goalProfile.notes}`)
+    }
+    if (phaseTasks.length > 0) {
+      lines.push("", "Checklist tasks in this roadmap section (each row = separate chat):")
+      phaseTasks.forEach((t, idx) => {
+        const status = t.completed ? "[x]" : "[ ]"
+        const marker = idx === taskIndex ? " (THIS CHAT)" : ""
+        lines.push(`${status} ${idx + 1}. ${t.title}${marker}`)
+      })
+      lines.push(
+        "",
+        "Sibling rows are not part of this chat's lesson steps. The 3 lesson steps (UI may say Phase 1–3) are micro-beats inside the CURRENT row only — lesson step 2 is never 'the next checkbox task'.",
+      )
+    }
+    if (lines.length > 0) {
+      systemPrompt = `${systemPrompt}\n\nADDITIONAL CONTEXT:\n${lines.join("\n")}`
+    }
+    return systemPrompt
+  }
+
+  function ttsCancel() {
+    ttsUserCancelledRef.current = true
+    ttsHandleRef.current?.cancel()
+    ttsHandleRef.current = null
+    setTtsSession(null)
+  }
+
+  /** Stop any in-flight playback without flagging as a user cancel (e.g. starting another message). */
+  function stopTtsForNewSession() {
+    ttsHandleRef.current?.cancel()
+    ttsHandleRef.current = null
+    setTtsSession(null)
+  }
+
+  function ttsPause() {
+    ttsHandleRef.current?.pause()
+    setTtsSession((s) => (s ? { ...s, phase: "paused" } : null))
+  }
+
+  function ttsResume() {
+    ttsHandleRef.current?.resume()
+    setTtsSession((s) => (s ? { ...s, phase: "playing" } : null))
+  }
+
+  async function playAssistantTts(messageIndex: number, rawContent: string) {
+    const paras = paragraphsForSpeech(rawContent)
+    if (!paras.length) return
+    stopTtsForNewSession()
+    ttsUserCancelledRef.current = false
+    const handle = startGeminiTtsPlayback(paras, {
+      onFirstAudioScheduled: () => {
+        setTtsSession({ index: messageIndex, phase: "playing" })
+      },
+    })
+    ttsHandleRef.current = handle
+    setTtsSession({ index: messageIndex, phase: "loading" })
+    try {
+      await handle.done
+    } catch {
+      if (ttsUserCancelledRef.current) return
+      if (ttsHandleRef.current !== handle) return
+      speakWithBrowserTts(paras.join(" "), userProfile?.preferredLanguage ?? undefined)
+    } finally {
+      ttsUserCancelledRef.current = false
+      if (ttsHandleRef.current === handle) {
+        ttsHandleRef.current = null
+        setTtsSession(null)
+      }
+    }
+  }
 
   async function sendMessage(text: string) {
     const trimmed = text.trim()
@@ -338,62 +501,7 @@ export function TaskChat({
     setSending(true)
 
     try {
-      const storedLessonObjectives =
-        task.lessonSteps?.length &&
-        teaching.teachingState === "teaching" &&
-        task.lessonSteps[teaching.currentPhaseIndex]
-          ? task.lessonSteps[teaching.currentPhaseIndex].objectives
-          : undefined
-
-      let systemPrompt = generateTaskGuideSystemPrompt(
-        goalTitle,
-        phaseTitle,
-        task,
-        teaching.teachingContext,
-        {
-          goalState: goalState ?? undefined,
-          goalProfile: goalProfile ?? undefined,
-          focusMode,
-          planPhaseIndex: phaseIndex,
-          planTaskIndex: taskIndex,
-          siblingRoadmapTaskTitles: siblingRoadmapTitles,
-          inChatPhaseTitles:
-            teaching.phases.length > 0
-              ? teaching.phases.map((p) => p.title)
-              : undefined,
-          storedLessonObjectives,
-        },
-      )
-
-      const lines: string[] = []
-      if (userProfile && (userProfile.nickname || userProfile.preferredLanguage || userProfile.preferredLearningStyle)) {
-        lines.push("User profile:")
-        if (userProfile.nickname) lines.push(`- Nickname: ${userProfile.nickname}`)
-        if (userProfile.preferredLanguage) lines.push(`- Preferred language: ${userProfile.preferredLanguage}`)
-        if (userProfile.preferredLearningStyle) lines.push(`- Learning style: ${userProfile.preferredLearningStyle}`)
-        if (userProfile.preferredTone) lines.push(`- Tone: ${userProfile.preferredTone}`)
-      }
-      if (goalProfile) {
-        lines.push("", "Goal-specific profile (detail):")
-        lines.push(`- Experience level: ${goalProfile.experienceLevel}`)
-        lines.push(`- Time per day: ${goalProfile.timePerDay}`)
-        if (goalProfile.notes) lines.push(`- Notes: ${goalProfile.notes}`)
-      }
-      if (phaseTasks.length > 0) {
-        lines.push("", "Checklist tasks in this roadmap section (each row = separate chat):")
-        phaseTasks.forEach((t, idx) => {
-          const status = t.completed ? "[x]" : "[ ]"
-          const marker = idx === taskIndex ? " (THIS CHAT)" : ""
-          lines.push(`${status} ${idx + 1}. ${t.title}${marker}`)
-        })
-        lines.push(
-          "",
-          "Sibling rows are not part of this chat's lesson steps. The 3 lesson steps (UI may say Phase 1–3) are micro-beats inside the CURRENT row only — lesson step 2 is never 'the next checkbox task'.",
-        )
-      }
-      if (lines.length > 0) {
-        systemPrompt = `${systemPrompt}\n\nADDITIONAL CONTEXT:\n${lines.join("\n")}`
-      }
+      const systemPrompt = buildCoachSystemPrompt()
 
       // XML-style tags make it harder for the model to pattern-match and
       // continue both sides of the conversation.
@@ -452,6 +560,12 @@ export function TaskChat({
       }
       const final: ChatMessage[] = [...updated, { role: "assistant", content: parsed.clean }]
       setMessages(final)
+      if (autoReadAloud) {
+        const last = final[final.length - 1]
+        if (last?.role === "assistant" && last.content.trim()) {
+          void playAssistantTts(final.length - 1, last.content)
+        }
+      }
       if (uid && chatHydrationReady) {
         void saveTaskChat(uid, goalId, phaseIndex, taskIndex, final, undefined).catch(console.error)
       }
@@ -523,6 +637,7 @@ export function TaskChat({
   const isQuizResultMode =
     teaching.teachingState === "quiz_result_pass" ||
     teaching.teachingState === "quiz_result_fail"
+  const chatInputDisabled = sending || loadingHistory || teaching.teachingState === "loading"
 
   const structuredTeachingChrome =
     teaching.teachingState !== null &&
@@ -610,6 +725,31 @@ export function TaskChat({
             title={focusMode ? "Focus mode on — shorter, execution-style replies" : "Focus mode — shorter replies"}
           >
             <ListChecks className="h-3.5 w-3.5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setAutoReadAloud((v) => !v)}
+            className={`shrink-0 h-7 w-7 flex items-center justify-center rounded-full transition-colors ${
+              autoReadAloud
+                ? "bg-brand/15 text-brand border border-brand/30"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+            }`}
+            title={autoReadAloud ? "Auto-read: on — new AI replies are spoken" : "Auto-read: off — tap Listen on a message to hear it"}
+          >
+            <Volume2 className="h-3.5 w-3.5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setVoiceInstruction(buildCoachSystemPrompt())
+              setVoicePanelOpen(true)
+            }}
+            className="shrink-0 h-7 w-7 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title="Voice call with AI coach (microphone)"
+          >
+            <Phone className="h-3.5 w-3.5" />
           </button>
 
           {/* Copy chat button */}
@@ -777,6 +917,80 @@ export function TaskChat({
                               handleChecklistChange(i, slot, indices)
                             }
                           />
+                          {msg.content.trim() !== "" && (
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              {ttsSession?.index === i && ttsSession.phase === "loading" ? (
+                                <>
+                                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background/80 px-2.5 py-1 text-[10px] font-semibold text-muted-foreground">
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                    Preparing voice…
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => ttsCancel()}
+                                    className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2.5 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted"
+                                    title="Stop"
+                                  >
+                                    <Square className="h-3 w-3" />
+                                    Stop
+                                  </button>
+                                </>
+                              ) : ttsSession?.index === i && ttsSession.phase === "playing" ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => ttsPause()}
+                                    className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/80 px-2.5 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted"
+                                    title="Pause"
+                                  >
+                                    <Pause className="h-3 w-3" />
+                                    Pause
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => ttsCancel()}
+                                    className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2.5 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted"
+                                    title="Stop"
+                                  >
+                                    <Square className="h-3 w-3" />
+                                    Stop
+                                  </button>
+                                </>
+                              ) : ttsSession?.index === i && ttsSession.phase === "paused" ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => ttsResume()}
+                                    className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/80 px-2.5 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted"
+                                    title="Resume"
+                                  >
+                                    <Play className="h-3 w-3" />
+                                    Resume
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => ttsCancel()}
+                                    className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2.5 py-1 text-[10px] font-semibold text-muted-foreground hover:bg-muted"
+                                    title="Stop"
+                                  >
+                                    <Square className="h-3 w-3" />
+                                    Stop
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => void playAssistantTts(i, msg.content)}
+                                  disabled={ttsSession !== null && ttsSession.index !== i}
+                                  className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background/80 px-2.5 py-1 text-[10px] font-semibold text-muted-foreground hover:text-foreground hover:border-brand/40 hover:bg-brand/5 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                                  title="Read this reply aloud (Gemini TTS)"
+                                >
+                                  <Volume2 className="h-3 w-3" />
+                                  Listen
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         /* User: fixed corner radius avoids collapsing to a circle on narrow widths */
@@ -1127,34 +1341,43 @@ export function TaskChat({
       {/* ── Floating input (hidden during active quiz) ───────────────────── */}
       {!isQuizMode && !isQuizResultMode && (
         <div className={`shrink-0 px-4 pb-5 pt-2 ${maxWidth} mx-auto w-full`}>
-          <div className="flex gap-2 items-center bg-card border border-border/80 shadow-lg shadow-black/5 rounded-3xl px-4 py-2 focus-within:border-ring/40 focus-within:ring-2 focus-within:ring-ring/20 transition-all duration-200">
-            <textarea
-              ref={inputRef}
-              rows={1}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value)
-                e.target.style.height = "auto"
-                e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder={
-                teaching.teachingState === "recap"
-                  ? "Continue the recap conversation…"
-                  : "Ask about this task…"
-              }
-              disabled={sending || loadingHistory || teaching.teachingState === "loading"}
-              className="flex-1 resize-none bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 leading-relaxed py-1"
-              style={{ minHeight: "24px", maxHeight: "120px", overflowY: "auto" }}
+          {voicePanelOpen ? (
+            <TaskVoiceCallPanel
+              open={voicePanelOpen}
+              onClose={() => setVoicePanelOpen(false)}
+              systemInstruction={voiceInstruction}
+              onTranscriptDelta={handleVoiceTranscriptDelta}
             />
-            <button
-              onClick={() => sendMessage(input)}
-              disabled={!input.trim() || sending || loadingHistory || teaching.teachingState === "loading"}
-              className="shrink-0 h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:opacity-80 transition-opacity disabled:opacity-30 disabled:pointer-events-none shadow-sm"
-            >
-              <Send className="h-3.5 w-3.5" />
-            </button>
-          </div>
+          ) : (
+            <div className="flex gap-2 items-center bg-card border border-border/80 shadow-lg shadow-black/5 rounded-3xl px-4 py-2 focus-within:border-ring/40 focus-within:ring-2 focus-within:ring-ring/20 transition-all duration-200">
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value)
+                  e.target.style.height = "auto"
+                  e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px"
+                }}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  teaching.teachingState === "recap"
+                    ? "Continue the recap conversation…"
+                    : "Ask about this task…"
+                }
+                disabled={chatInputDisabled}
+                className="flex-1 resize-none bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/60 disabled:opacity-50 leading-relaxed py-1"
+                style={{ minHeight: "24px", maxHeight: "120px", overflowY: "auto" }}
+              />
+              <button
+                onClick={() => sendMessage(input)}
+                disabled={!input.trim() || chatInputDisabled}
+                className="shrink-0 h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:opacity-80 transition-opacity disabled:opacity-30 disabled:pointer-events-none shadow-sm"
+              >
+                <Send className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

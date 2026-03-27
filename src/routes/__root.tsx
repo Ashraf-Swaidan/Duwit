@@ -1,19 +1,39 @@
 import { createRootRoute, Outlet, useNavigate, Link, useRouterState } from '@tanstack/react-router'
 import { useState } from 'react'
 import { signOut } from "firebase/auth"
-import { Settings, LogOut, Cpu, Check, X, MessageCircle, Target } from "lucide-react"
+import { Settings, LogOut, Cpu, Check, X, MessageCircle, Target, Mic } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { auth } from "@/lib/firebase"
 import { useAuth } from "@/hooks/useAuth"
 import { useModel, MODEL_GROUPS, type ModelId } from "@/contexts/ModelContext"
+import { useVoiceLiveModel } from "@/contexts/VoiceLiveModelContext"
+import type { VoiceLiveModelChoice } from "@/config/geminiMedia"
 
 export const Route = createRootRoute({
   component: RootComponent,
 })
 
+const VOICE_LIVE_OPTIONS: {
+  id: VoiceLiveModelChoice
+  name: string
+  description: string
+}[] = [
+  {
+    id: "gemini31FlashLive",
+    name: "Gemini 3.1 Flash Live",
+    description: "Best for voice calls — low-latency live dialogue (preview).",
+  },
+  {
+    id: "gemini25NativeAudio",
+    name: "Gemini 2.5 Native Audio",
+    description: "Stable Live preview — native audio dialog.",
+  },
+]
+
 function RootComponent() {
   const { user, loading: authLoading } = useAuth()
   const { selectedModel, setSelectedModel } = useModel()
+  const { voiceLiveModel, setVoiceLiveModel } = useVoiceLiveModel()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const navigate = useNavigate()
   const routerState = useRouterState()
@@ -173,6 +193,37 @@ function RootComponent() {
                     ))}
                   </div>
                 </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Mic className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-semibold">Voice call (Live)</span>
+            </div>
+            <div className="space-y-1.5">
+              {VOICE_LIVE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setVoiceLiveModel(opt.id)}
+                  className={`w-full text-left rounded-2xl border p-3 transition-all duration-150 ${
+                    voiceLiveModel === opt.id
+                      ? "border-primary bg-primary/5 shadow-sm"
+                      : "border-border hover:border-primary/40 hover:bg-muted/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold">{opt.name}</span>
+                    {voiceLiveModel === opt.id && (
+                      <div className="shrink-0 h-4 w-4 rounded-full bg-primary flex items-center justify-center">
+                        <Check className="h-2.5 w-2.5 text-primary-foreground" />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
+                </button>
               ))}
             </div>
           </div>

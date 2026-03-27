@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useLayoutEffect } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { ArrowLeft, Trash2 } from "lucide-react"
 import { PhaseCard } from "@/components/PhaseCard"
@@ -11,7 +11,6 @@ import {
   getGoal,
   isGoalCompleted,
   updateTaskCompletion,
-  type Task,
 } from "@/services/goals"
 import { recordTaskMarkedCompleteInGoalState } from "@/services/goalState"
 import { notifyHomeGoalsChanged } from "@/services/userContext"
@@ -23,11 +22,10 @@ interface PlanViewProps {
   onBack?: () => void
 }
 
+/** Only indices — task + phase titles always come from live `goal` so refetches never show a stale task. */
 interface ActiveChat {
-  task: Task
   phaseIndex: number
   taskIndex: number
-  phaseTitle: string
 }
 
 function PlanLoadingSkeleton({ onBack }: { onBack?: () => void }) {
@@ -159,6 +157,13 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
     enabled: !!user && !!goalId,
   })
 
+  useLayoutEffect(() => {
+    if (!activeChat || !goal) return
+    const phase = goal.phases[activeChat.phaseIndex]
+    const task = phase?.tasks[activeChat.taskIndex]
+    if (!phase || !task) setActiveChat(null)
+  }, [goal, activeChat])
+
   async function handleTaskToggle(phaseIndex: number, taskIndex: number, completed: boolean) {
     if (!user || !goal) return
     setUpdating(true)
@@ -202,8 +207,8 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
     if (!goal) return
     const phase = goal.phases[phaseIndex]
     const task = phase?.tasks[taskIndex]
-    if (!task) return
-    setActiveChat({ task, phaseIndex, taskIndex, phaseTitle: phase.title })
+    if (!phase || !task) return
+    setActiveChat({ phaseIndex, taskIndex })
   }
 
   if (loading) {
@@ -233,6 +238,9 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
   const doneTasks = goal.phases.reduce((a, p) => a + p.tasks.filter((t) => t.completed).length, 0)
   const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0
   const journeyComplete = isGoalCompleted(goal)
+
+  const activePhase = activeChat ? goal.phases[activeChat.phaseIndex] : undefined
+  const activeTask = activePhase && activeChat ? activePhase.tasks[activeChat.taskIndex] : undefined
 
   async function handleConfirmDelete() {
     if (!user) return
@@ -363,7 +371,7 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
         </div>
 
         {/* Chat Area (Responsive) */}
-        {activeChat && (
+        {activeChat && activeTask && activePhase && (
           <div
             className={`flex-1 bg-background relative z-40 lg:z-0 animate-in slide-in-from-right duration-300 h-full overflow-hidden flex flex-col ${
               readingFocusMode ? "lg:items-center" : ""
@@ -371,10 +379,11 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
           >
             <div className={`w-full h-full min-h-0 ${readingFocusMode ? "lg:max-w-4xl" : ""}`}>
             <TaskChat
-              task={activeChat.task}
+              key={`${goalId}-${activeChat.phaseIndex}-${activeChat.taskIndex}`}
+              task={activeTask}
               goalId={goalId}
               goalTitle={goal.title}
-              phaseTitle={activeChat.phaseTitle}
+              phaseTitle={activePhase.title}
               phaseIndex={activeChat.phaseIndex}
               taskIndex={activeChat.taskIndex}
               goalProfile={goal.profile}
@@ -382,7 +391,7 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
               onGoalStateUpdated={() =>
                 queryClient.invalidateQueries({ queryKey: ["goal", goalId] })
               }
-              phaseTasks={goal.phases[activeChat.phaseIndex].tasks}
+              phaseTasks={activePhase.tasks}
               onClose={() => setActiveChat(null)}
               isDesktopSideView={true}
               readingFocusMode={readingFocusMode}
