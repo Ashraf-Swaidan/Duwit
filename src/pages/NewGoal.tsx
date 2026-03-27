@@ -7,6 +7,8 @@ import { generatePlanPrompt, PLAN_GENERATION_SYSTEM_PROMPT } from "@/services/pr
 import { createGoal, type Goal } from "@/services/goals"
 import { expandCurriculumForPlan } from "@/services/curriculumExpansion"
 import { useModel } from "@/contexts/ModelContext"
+import { formatUserProfileForPrompt } from "@/services/user"
+import { useProfileDialog } from "@/contexts/ProfileDialogContext"
 
 interface NewGoalProps {
   onSuccess?: (goalId: string) => void
@@ -24,6 +26,7 @@ const TIME_OPTIONS = [
 export function NewGoal({ onSuccess, onBack }: NewGoalProps) {
   const user = auth.currentUser
   const { selectedModel } = useModel()
+  const { profile: userProfile } = useProfileDialog()
 
   const [goal, setGoal] = useState("")
   const [timePerDay, setTimePerDay] = useState("30 minutes")
@@ -49,9 +52,13 @@ export function NewGoal({ onSuccess, onBack }: NewGoalProps) {
     let stage: "outline" | "lessons" = "outline"
     try {
       const prompt = generatePlanPrompt(goal, timePerDay)
+      const planBlock = formatUserProfileForPrompt(userProfile)
+      const planSystemPrompt = planBlock
+        ? `${PLAN_GENERATION_SYSTEM_PROMPT}\n\n${planBlock}`
+        : PLAN_GENERATION_SYSTEM_PROMPT
       const plan = await callAIStructured<Omit<Goal, "id" | "uid" | "status" | "createdAt" | "progress">>({
         prompt,
-        systemPrompt: PLAN_GENERATION_SYSTEM_PROMPT,
+        systemPrompt: planSystemPrompt,
         temperature: 0.2,
         maxOutputTokens: 5000,
         modelName: selectedModel,

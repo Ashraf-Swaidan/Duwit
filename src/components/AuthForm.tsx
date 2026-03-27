@@ -6,6 +6,7 @@ import {
 } from "firebase/auth"
 import { auth, db } from "@/lib/firebase"
 import { doc, setDoc } from "firebase/firestore"
+import { USER_PROFILE_VERSION } from "@/services/user"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -50,6 +51,7 @@ export function AuthForm({ onSuccess, layout = "page", defaultMode = "login" }: 
           createdAt: new Date().toISOString(),
           profile: {
             nickname: displayName || email.split("@")[0],
+            profileVersion: USER_PROFILE_VERSION,
           },
         })
         onSuccess?.()

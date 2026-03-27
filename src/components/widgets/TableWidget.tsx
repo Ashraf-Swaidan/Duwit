@@ -1,3 +1,5 @@
+import { resolveKeyedCell } from "@/lib/widgetCells"
+
 interface TableColumn {
   key: string
   label: string
@@ -23,6 +25,7 @@ export function TableWidget({
   const tableData = data as TableData
   const columns = tableData.columns || []
   const rows = tableData.rows || []
+  const columnKeys = columns.map((c) => c.key)
 
   if (columns.length === 0 || rows.length === 0) {
     return (
@@ -56,14 +59,14 @@ export function TableWidget({
           <tbody>
             {rows.map((row, idx) => (
               <tr key={idx} className="hover:bg-muted/20">
-                {columns.map((col) => (
+                {columns.map((col, cidx) => (
                   <td
                     key={`${idx}-${col.key}`}
                     className={`border border-border/40 px-3 py-2 ${
                       col.type === "number" ? "text-right font-mono" : ""
                     }`}
                   >
-                    {String(row[col.key] ?? "")}
+                    {resolveKeyedCell(row as Record<string, unknown>, col.key, cidx, columnKeys)}
                   </td>
                 ))}
               </tr>

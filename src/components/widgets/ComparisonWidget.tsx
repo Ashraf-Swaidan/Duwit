@@ -1,3 +1,5 @@
+import { resolveKeyedCell } from "@/lib/widgetCells"
+
 interface ComparisonRow {
   label: string
   [key: string]: unknown
@@ -69,14 +71,14 @@ export function ComparisonWidget({
                 <td className="border border-border/40 bg-muted/20 px-3 py-2 font-medium">
                   {row.label}
                 </td>
-                {columns.map((col) => (
+                {columns.map((col, cidx) => (
                   <td
                     key={`${idx}-${col}`}
                     className={`border border-border/40 px-3 py-2 text-center ${
                       isRecommendedColumn(col) ? "bg-brand/5" : ""
                     }`}
                   >
-                    {String(row[col] ?? "")}
+                    {resolveKeyedCell(row as Record<string, unknown>, col, cidx, columns)}
                   </td>
                 ))}
               </tr>
@@ -87,9 +89,9 @@ export function ComparisonWidget({
 
       {/* Mobile view - cards per subject */}
       <div className="space-y-3 md:hidden">
-        {columns.map((col) => (
+        {columns.map((col, cidx) => (
           <div
-            key={col}
+            key={`${col}-${cidx}`}
             className={`rounded-lg border p-4 ${
               isRecommendedColumn(col)
                 ? "border-brand/60 bg-brand/5"
@@ -106,7 +108,9 @@ export function ComparisonWidget({
               {rows.map((row, idx) => (
                 <div key={idx} className="flex justify-between border-t border-border/20 pt-2">
                   <p className="text-xs font-medium text-muted-foreground">{row.label}</p>
-                  <p className="text-sm">{String(row[col] ?? "")}</p>
+                  <p className="text-sm">
+                    {resolveKeyedCell(row as Record<string, unknown>, col, cidx, columns)}
+                  </p>
                 </div>
               ))}
             </div>

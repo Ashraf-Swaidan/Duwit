@@ -24,15 +24,21 @@ export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"]
 
 const DEFAULT_MODEL: ModelId = "gemma-3-27b-it"
 const STORAGE_KEY = "duwit_selected_model"
+const SEARCH_MODEL_STORAGE_KEY = "duwit_search_model"
 
 interface ModelContextValue {
   selectedModel: ModelId
   setSelectedModel: (model: ModelId) => void
+  /** Null means: use selectedModel for search calls too. */
+  selectedSearchModel: ModelId | null
+  setSelectedSearchModel: (model: ModelId | null) => void
 }
 
 const ModelContext = createContext<ModelContextValue>({
   selectedModel: DEFAULT_MODEL,
   setSelectedModel: () => {},
+  selectedSearchModel: null,
+  setSelectedSearchModel: () => {},
 })
 
 export function ModelProvider({ children }: { children: ReactNode }) {
@@ -45,6 +51,16 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       return DEFAULT_MODEL
     }
   })
+  const [selectedSearchModel, setSelectedSearchModelState] = useState<ModelId | null>(() => {
+    try {
+      const stored = localStorage.getItem(SEARCH_MODEL_STORAGE_KEY)
+      if (!stored || stored === "__same__") return null
+      const valid = AVAILABLE_MODELS.map((m) => m.id) as string[]
+      return (valid.includes(stored) ? stored : null) as ModelId | null
+    } catch {
+      return null
+    }
+  })
 
   function setSelectedModel(model: ModelId) {
     setSelectedModelState(model)
@@ -53,8 +69,17 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     } catch {}
   }
 
+  function setSelectedSearchModel(model: ModelId | null) {
+    setSelectedSearchModelState(model)
+    try {
+      localStorage.setItem(SEARCH_MODEL_STORAGE_KEY, model ?? "__same__")
+    } catch {}
+  }
+
   return (
-    <ModelContext.Provider value={{ selectedModel, setSelectedModel }}>
+    <ModelContext.Provider
+      value={{ selectedModel, setSelectedModel, selectedSearchModel, setSelectedSearchModel }}
+    >
       {children}
     </ModelContext.Provider>
   )

@@ -13,7 +13,8 @@ import {
 import { createGoal, type Goal, type ChatMessage, type GoalProfile } from "@/services/goals"
 import { expandCurriculumForPlan } from "@/services/curriculumExpansion"
 import { useModel } from "@/contexts/ModelContext"
-import { getUserProfile, type UserProfile } from "@/services/user"
+import { formatUserProfileForPrompt } from "@/services/user"
+import { useProfileDialog } from "@/contexts/ProfileDialogContext"
 import { Markdown } from "@/components/Markdown"
 
 interface GoalChatProps {
@@ -42,16 +43,11 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const { profile: userProfile } = useProfileDialog()
 
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
-
-  useEffect(() => {
-    if (!user) return
-    getUserProfile(user.uid).then(setUserProfile).catch(() => setUserProfile(null))
-  }, [user])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -89,22 +85,16 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
         )
         .join("\n") + "\n<coach>"
 
-      const systemPrompt =
-        userProfile && (userProfile.nickname || userProfile.preferredLanguage || userProfile.preferredLearningStyle)
-          ? `${GOAL_CHAT_SYSTEM_PROMPT}
-
-User profile for this conversation:
-- Nickname: ${userProfile.nickname ?? "not set"}
-- Preferred language: ${userProfile.preferredLanguage ?? "not specified"}
-- Preferred learning style: ${userProfile.preferredLearningStyle ?? "not specified"}
-- Tone preference: ${userProfile.preferredTone ?? "neutral"}`
-          : GOAL_CHAT_SYSTEM_PROMPT
+      const profileBlock = formatUserProfileForPrompt(userProfile)
+      const systemPrompt = profileBlock
+        ? `${GOAL_CHAT_SYSTEM_PROMPT}\n\n${profileBlock}`
+        : GOAL_CHAT_SYSTEM_PROMPT
 
       // Streaming placeholder
       setMessages([...updated, { role: "assistant", content: "" }])
 
       let accumulated = ""
-      const response = await callAIStream({
+      const { text: response } = await callAIStream({
         prompt: history,
         systemPrompt,
         temperature: 0.8,
@@ -139,11 +129,16 @@ User profile for this conversation:
     try {
       // 1) Build the plan from the conversation
       const planPrompt = generatePlanFromChatPrompt(messages)
+      const planProfileBlock = formatUserProfileForPrompt(userProfile)
+      const planSystemPrompt = planProfileBlock
+        ? `${PLAN_GENERATION_SYSTEM_PROMPT}\n\n${planProfileBlock}`
+        : PLAN_GENERATION_SYSTEM_PROMPT
+
       const plan = await callAIStructured<
         Omit<Goal, "id" | "uid" | "status" | "createdAt" | "progress">
       >({
         prompt: planPrompt,
-        systemPrompt: PLAN_GENERATION_SYSTEM_PROMPT,
+        systemPrompt: planSystemPrompt,
         temperature: 0.2,
         maxOutputTokens: 5000,
         modelName: selectedModel,

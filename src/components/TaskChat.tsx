@@ -23,6 +23,7 @@ import {
   Pause,
   Play,
   Square,
+  Globe,
 } from "lucide-react"
 import type { Task, ChatMessage, GoalProfile, GoalState } from "@/services/goals"
 import { saveTaskChat, loadTaskChatDocument } from "@/services/goals"
@@ -34,11 +35,12 @@ import {
   maybeCompressTaskChatIntoGoalState,
 } from "@/services/goalState"
 import { auth } from "@/lib/firebase"
-import { callAIStream } from "@/services/ai"
+import { callAIStream, type WebGroundingInfo } from "@/services/ai"
 import { generateTaskGuideSystemPrompt, generateTaskSuggestedPrompt } from "@/services/prompts"
 import { useModel } from "@/contexts/ModelContext"
 import { Markdown } from "@/components/Markdown"
-import { getUserProfile, type UserProfile } from "@/services/user"
+import { formatUserProfileForPrompt } from "@/services/user"
+import { useProfileDialog } from "@/contexts/ProfileDialogContext"
 import { useTaskTeaching } from "@/hooks/useTaskTeaching"
 import { parseWidgets } from "@/lib/parseWidgets"
 import { paragraphsForSpeech } from "@/lib/plainTextForSpeech"
@@ -74,6 +76,54 @@ function scrollToBottom(el: HTMLDivElement | null, smooth = true) {
   el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" })
 }
 
+function WebGroundingBlock({ info }: { info: WebGroundingInfo }) {
+  const hasQ = info.webSearchQueries.length > 0
+  const hasS = info.sources.length > 0
+  if (!hasQ && !hasS) return null
+  return (
+    <div className="mt-2 rounded-xl border border-border/60 bg-muted/25 px-3 py-2.5 space-y-2">
+      {hasQ && (
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">
+            Web search
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {info.webSearchQueries.map((q, qi) => (
+              <span
+                key={qi}
+                className="rounded-full bg-background/80 border border-border/60 px-2.5 py-0.5 text-[11px] text-foreground/90"
+              >
+                {q}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {hasS && (
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">
+            Sources
+          </p>
+          <ul className="space-y-1">
+            {info.sources.map((s, si) => (
+              <li key={`${s.uri}-${si}`}>
+                <a
+                  href={s.uri}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-brand hover:underline wrap-break-word"
+                >
+                  {s.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function TaskChat({
   task,
   goalId,
@@ -94,10 +144,15 @@ export function TaskChat({
   goalState,
   onGoalStateUpdated,
 }: TaskChatProps) {
-  const { selectedModel } = useModel()
+  const { selectedModel, selectedSearchModel } = useModel()
   const [focusMode, setFocusMode] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [youtubeMeta, setYoutubeMeta] = useState<Record<number, { youtubeSearches: string[]; channels: string[] }>>({})
+  /** Per assistant message: web search queries + sources (session only; not persisted). */
+  const [messageGrounding, setMessageGrounding] = useState<Record<number, WebGroundingInfo>>({})
+  /** While streaming a reply with web search enabled. */
+  const [webSearchStreamPhase, setWebSearchStreamPhase] = useState<"idle" | "searching" | "writing">("idle")
+  const [streamingGrounding, setStreamingGrounding] = useState<WebGroundingInfo | null>(null)
   const [input, setInput] = useState("")
   const [loadingHistory, setLoadingHistory] = useState(true)
   const [chatHydrationReady, setChatHydrationReady] = useState(false)
@@ -112,7 +167,7 @@ export function TaskChat({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const prevLengthRef = useRef(0)
   const quizGoalStateRecordedRef = useRef<string | null>(null)
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const { profile: userProfile } = useProfileDialog()
   const [autoReadAloud, setAutoReadAloud] = useState(false)
   const [voicePanelOpen, setVoicePanelOpen] = useState(false)
   const [voiceInstruction, setVoiceInstruction] = useState("")
@@ -224,12 +279,6 @@ export function TaskChat({
     document.body.style.overflow = "hidden"
     return () => { document.body.style.overflow = "" }
   }, [isDesktopSideView])
-
-  useEffect(() => {
-    const uid = auth.currentUser?.uid
-    if (!uid) return
-    getUserProfile(uid).then(setUserProfile).catch(() => setUserProfile(null))
-  }, [])
 
   useEffect(() => {
     const uid = auth.currentUser?.uid
@@ -407,13 +456,8 @@ export function TaskChat({
     )
 
     const lines: string[] = []
-    if (userProfile && (userProfile.nickname || userProfile.preferredLanguage || userProfile.preferredLearningStyle)) {
-      lines.push("User profile:")
-      if (userProfile.nickname) lines.push(`- Nickname: ${userProfile.nickname}`)
-      if (userProfile.preferredLanguage) lines.push(`- Preferred language: ${userProfile.preferredLanguage}`)
-      if (userProfile.preferredLearningStyle) lines.push(`- Learning style: ${userProfile.preferredLearningStyle}`)
-      if (userProfile.preferredTone) lines.push(`- Tone: ${userProfile.preferredTone}`)
-    }
+    const profileBlock = formatUserProfileForPrompt(userProfile)
+    if (profileBlock) lines.push(profileBlock)
     if (goalProfile) {
       lines.push("", "Goal-specific profile (detail):")
       lines.push(`- Experience level: ${goalProfile.experienceLevel}`)
@@ -499,6 +543,8 @@ export function TaskChat({
     setInput("")
     if (inputRef.current) inputRef.current.style.height = "auto"
     setSending(true)
+    setWebSearchStreamPhase("idle")
+    setStreamingGrounding(null)
 
     try {
       const systemPrompt = buildCoachSystemPrompt()
@@ -533,12 +579,23 @@ export function TaskChat({
       setMessages([...updated, { role: "assistant", content: "" }])
 
       let accumulated = ""
-      const response = await callAIStream({
+      setWebSearchStreamPhase("searching")
+      const { text: response, grounding: responseGrounding } = await callAIStream({
         prompt: history,
         systemPrompt,
         temperature: focusMode ? 0.42 : 0.55,
         maxOutputTokens: focusMode ? 650 : 900,
-        modelName: selectedModel,
+        modelName: selectedSearchModel ?? selectedModel,
+        enableWebSearch: true,
+        onStreamProgress: (evt) => {
+          if (evt.type === "phase") {
+            setWebSearchStreamPhase(evt.phase)
+            return
+          }
+          if (evt.type === "grounding") {
+            setStreamingGrounding(evt.data)
+          }
+        },
         onChunk: (piece) => {
           accumulated += piece
           const displayText = truncateAtStudentTurn(
@@ -560,6 +617,11 @@ export function TaskChat({
       }
       const final: ChatMessage[] = [...updated, { role: "assistant", content: parsed.clean }]
       setMessages(final)
+      if (responseGrounding && (responseGrounding.webSearchQueries.length > 0 || responseGrounding.sources.length > 0)) {
+        setMessageGrounding((prev) => ({ ...prev, [assistantIndex]: responseGrounding }))
+      }
+      setWebSearchStreamPhase("idle")
+      setStreamingGrounding(null)
       if (autoReadAloud) {
         const last = final[final.length - 1]
         if (last?.role === "assistant" && last.content.trim()) {
@@ -592,6 +654,8 @@ export function TaskChat({
         ...prev,
         { role: "assistant", content: "Sorry, couldn't get a response. Please try again." },
       ])
+      setWebSearchStreamPhase("idle")
+      setStreamingGrounding(null)
     } finally {
       setSending(false)
     }
@@ -617,6 +681,9 @@ export function TaskChat({
     setSessionKey((k) => k + 1)
     setInput("")
     setConfirmReset(false)
+    setMessageGrounding({})
+    setWebSearchStreamPhase("idle")
+    setStreamingGrounding(null)
     if (uid) await saveTaskChat(uid, goalId, phaseIndex, taskIndex, [], null).catch(console.error)
   }
 
@@ -1002,6 +1069,10 @@ export function TaskChat({
                         </div>
                       )}
 
+                      {msg.role === "assistant" && messageGrounding[i] ? (
+                        <WebGroundingBlock info={messageGrounding[i]} />
+                      ) : null}
+
                       {msg.role === "assistant" && youtubeMeta[i] ? (
                         <div className="mt-2 flex flex-wrap gap-2">
                           {youtubeMeta[i].youtubeSearches.map((q, qi) => (
@@ -1033,9 +1104,37 @@ export function TaskChat({
                 )
               })}
 
-              {/* Typing dots only shown before first chunk arrives */}
+              {/* Web search status + typing dots before first visible text */}
               {sending && messages.length > 0 && messages[messages.length - 1]?.role === "assistant" && messages[messages.length - 1]?.content === "" && (
-                <div className="flex justify-start animate-in fade-in duration-150 py-1">
+                <div className="flex flex-col justify-start gap-2 animate-in fade-in duration-150 py-1">
+                  <div className="rounded-xl border border-border/60 bg-muted/20 px-3 py-2.5 text-[11px] max-w-[min(100%,28rem)] space-y-1.5">
+                    <div className="flex items-center gap-2 text-muted-foreground font-semibold">
+                      <Globe className="h-3.5 w-3.5 shrink-0 text-brand/80" />
+                      {webSearchStreamPhase === "searching" ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" aria-hidden />
+                          <span>Searching the web…</span>
+                        </>
+                      ) : (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0 opacity-70" aria-hidden />
+                          <span>Composing answer…</span>
+                        </>
+                      )}
+                    </div>
+                    {streamingGrounding && streamingGrounding.webSearchQueries.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-0.5">
+                        {streamingGrounding.webSearchQueries.map((q, qi) => (
+                          <span
+                            key={qi}
+                            className="rounded-full bg-background/90 border border-border/50 px-2 py-0.5 text-[10px] leading-tight text-foreground/90"
+                          >
+                            {q}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <div className="flex gap-1.5 items-center h-6">
                     <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.3s]" />
                     <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.15s]" />

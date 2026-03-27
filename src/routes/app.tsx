@@ -14,6 +14,8 @@ import {
 } from "@/services/userContext"
 import { callAI, callAIStream } from "@/services/ai"
 import { HOME_CONCIERGE_SYSTEM_PROMPT, generateHomeConciergePrompt } from "@/services/prompts"
+import { formatUserProfileForPrompt } from "@/services/user"
+import { useProfileDialog } from "@/contexts/ProfileDialogContext"
 import { Send, Sparkles } from 'lucide-react'
 import { Markdown } from "@/components/Markdown"
 import { loadHomeChat, saveHomeChat, clearHomeChat } from "@/services/homeChatStore"
@@ -46,6 +48,12 @@ function HomePage() {
   const navigate = useNavigate()
   const firstName = user?.displayName?.split(' ')[0] || user?.email?.split('@')[0] || 'there'
   const { selectedModel } = useModel()
+  const { profile: userProfile } = useProfileDialog()
+
+  const conciergeSystemPrompt = (() => {
+    const block = formatUserProfileForPrompt(userProfile)
+    return block ? `${HOME_CONCIERGE_SYSTEM_PROMPT}\n\n${block}` : HOME_CONCIERGE_SYSTEM_PROMPT
+  })()
 
   const { data: goals = [], isPending: goalsLoading } = useQuery({
     queryKey: ['goals', user?.uid],
@@ -162,7 +170,7 @@ function HomePage() {
       const greetingPrompt = generateHomeConciergePrompt(goalData, `The user just opened the app. Generate a warm, personalised greeting (2-3 sentences) that:\n- Acknowledges their most in-progress or recently active goal\n- Suggests they continue it or asks what they'd like to focus on today\n- Feels conversational, not scripted`)
       const aiGreeting = await callAI({
         prompt: greetingPrompt,
-        systemPrompt: HOME_CONCIERGE_SYSTEM_PROMPT,
+        systemPrompt: conciergeSystemPrompt,
         temperature: 0.55,
         maxOutputTokens: 150,
         modelName: selectedModel,
@@ -216,9 +224,9 @@ function HomePage() {
       setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
 
       let accumulated = ''
-      const aiResponse = await callAIStream({
+      const { text: aiResponse } = await callAIStream({
         prompt: generateHomeConciergePrompt(goalData, conversation),
-        systemPrompt: HOME_CONCIERGE_SYSTEM_PROMPT,
+        systemPrompt: conciergeSystemPrompt,
         temperature: 0.55,
         maxOutputTokens: 200,
         modelName: selectedModel,
