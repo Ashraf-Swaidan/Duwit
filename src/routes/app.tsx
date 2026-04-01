@@ -12,7 +12,7 @@ import {
   saveCachedGreeting,
   type CachedGreeting,
 } from "@/services/userContext"
-import { callAI, callAIStream } from "@/services/ai"
+import { callAI, callAIStream, generateImage } from "@/services/ai"
 import { HOME_CONCIERGE_SYSTEM_PROMPT, generateHomeConciergePrompt } from "@/services/prompts"
 import { formatUserProfileForPrompt } from "@/services/user"
 import { useProfileDialog } from "@/contexts/ProfileDialogContext"
@@ -47,7 +47,7 @@ function HomePage() {
   const user = auth.currentUser
   const navigate = useNavigate()
   const firstName = user?.displayName?.split(' ')[0] || user?.email?.split('@')[0] || 'there'
-  const { selectedModel } = useModel()
+  const { selectedModel, selectedImageModel } = useModel()
   const { profile: userProfile } = useProfileDialog()
 
   const conciergeSystemPrompt = (() => {
@@ -214,6 +214,22 @@ function HomePage() {
     setIsThinking(true)
 
     try {
+      const imagePrompt =
+        trimmed.toLowerCase().startsWith('/image ')
+          ? trimmed.slice(7).trim()
+          : trimmed.toLowerCase().startsWith('/img ')
+            ? trimmed.slice(5).trim()
+            : null
+      if (imagePrompt) {
+        const image = await generateImage({
+          prompt: imagePrompt,
+          modelName: selectedImageModel,
+        })
+        const imageResponse = `Generated with \`${selectedImageModel}\`\n\n![${imagePrompt}](${image.dataUrl})`
+        setMessages((prev) => [...prev, { role: 'assistant', content: imageResponse }])
+        return
+      }
+
       const goalData = goalsToConciergeRows(goals)
 
       const conversation = nextMessages

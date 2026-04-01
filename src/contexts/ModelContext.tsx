@@ -19,12 +19,19 @@ export const MODEL_GROUPS = [
 ] as const
 
 export const AVAILABLE_MODELS = MODEL_GROUPS.flatMap((g) => g.models)
+export const IMAGE_MODELS = [
+  { id: "pollinations:flux", name: "Pollinations Flux", description: "General purpose image model" },
+  { id: "pollinations:zimage", name: "Z-Image Turbo", description: "Low-cost fast generation" },
+] as const
 
 export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"]
+export type ImageModelId = (typeof IMAGE_MODELS)[number]["id"]
 
 const DEFAULT_MODEL: ModelId = "gemma-3-27b-it"
+const DEFAULT_IMAGE_MODEL: ImageModelId = "pollinations:flux"
 const STORAGE_KEY = "duwit_selected_model"
 const SEARCH_MODEL_STORAGE_KEY = "duwit_search_model"
+const IMAGE_MODEL_STORAGE_KEY = "duwit_image_model"
 
 interface ModelContextValue {
   selectedModel: ModelId
@@ -32,6 +39,8 @@ interface ModelContextValue {
   /** Null means: use selectedModel for search calls too. */
   selectedSearchModel: ModelId | null
   setSelectedSearchModel: (model: ModelId | null) => void
+  selectedImageModel: ImageModelId
+  setSelectedImageModel: (model: ImageModelId) => void
 }
 
 const ModelContext = createContext<ModelContextValue>({
@@ -39,6 +48,8 @@ const ModelContext = createContext<ModelContextValue>({
   setSelectedModel: () => {},
   selectedSearchModel: null,
   setSelectedSearchModel: () => {},
+  selectedImageModel: DEFAULT_IMAGE_MODEL,
+  setSelectedImageModel: () => {},
 })
 
 export function ModelProvider({ children }: { children: ReactNode }) {
@@ -61,6 +72,15 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       return null
     }
   })
+  const [selectedImageModel, setSelectedImageModelState] = useState<ImageModelId>(() => {
+    try {
+      const stored = localStorage.getItem(IMAGE_MODEL_STORAGE_KEY)
+      const valid = IMAGE_MODELS.map((m) => m.id) as string[]
+      return (valid.includes(stored ?? "") ? stored : DEFAULT_IMAGE_MODEL) as ImageModelId
+    } catch {
+      return DEFAULT_IMAGE_MODEL
+    }
+  })
 
   function setSelectedModel(model: ModelId) {
     setSelectedModelState(model)
@@ -75,10 +95,23 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(SEARCH_MODEL_STORAGE_KEY, model ?? "__same__")
     } catch {}
   }
+  function setSelectedImageModel(model: ImageModelId) {
+    setSelectedImageModelState(model)
+    try {
+      localStorage.setItem(IMAGE_MODEL_STORAGE_KEY, model)
+    } catch {}
+  }
 
   return (
     <ModelContext.Provider
-      value={{ selectedModel, setSelectedModel, selectedSearchModel, setSelectedSearchModel }}
+      value={{
+        selectedModel,
+        setSelectedModel,
+        selectedSearchModel,
+        setSelectedSearchModel,
+        selectedImageModel,
+        setSelectedImageModel,
+      }}
     >
       {children}
     </ModelContext.Provider>

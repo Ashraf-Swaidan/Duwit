@@ -1,0 +1,10 @@
+---
+description: Dependency installs must be run manually by user
+alwaysApply: true
+---
+
+# Manual Dependency Installation
+
+- Never run `npm install`, `npm i`, or any install command that modifies dependencies.
+- If dependency installation is needed, ask the user to run the command manually.
+- Continue with all other safe project tasks after the user confirms installation is complete.

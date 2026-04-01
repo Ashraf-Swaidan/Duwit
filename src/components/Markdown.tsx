@@ -1,16 +1,114 @@
-import { useMemo } from "react"
-import ReactMarkdown from "react-markdown"
+import { Children, isValidElement, memo, useMemo, type ReactNode } from "react"
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown"
 import remarkGfm from "remark-gfm"
+import type { Components } from "react-markdown"
 
 import { cn } from "@/lib/utils"
 import { parseWidgets } from "@/lib/parseWidgets"
 import { WidgetRenderer } from "./WidgetRenderer"
+import { MarkdownCodeBlock } from "./MarkdownCodeBlock"
 
-function MarkdownText({ content }: { content: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+function getTextContent(node: ReactNode): string {
+  if (node == null || node === false) return ""
+  if (typeof node === "string" || typeof node === "number") return String(node)
+  if (Array.isArray(node)) return node.map(getTextContent).join("")
+  if (isValidElement(node)) {
+    const props = node.props as { children?: ReactNode }
+    if (props.children !== undefined) return getTextContent(props.children)
+  }
+  return ""
 }
 
-export function Markdown({
+function MarkdownPre({
+  children,
+  node: _node,
+}: {
+  children?: ReactNode
+  node?: unknown
+}) {
+  const child = Children.toArray(children)[0]
+  if (isValidElement(child)) {
+    const props = child.props as { className?: string; children?: ReactNode }
+    const codeText = getTextContent(props.children)
+    const language =
+      props.className?.match(/language-(\S+)/)?.[1]?.replace(/["']$/, "") ?? ""
+    return <MarkdownCodeBlock code={codeText} language={language} />
+  }
+  return (
+    <pre className="my-3 overflow-x-auto rounded-xl border border-border/80 bg-muted/30 p-3 text-xs leading-relaxed">
+      {children}
+    </pre>
+  )
+}
+
+function MarkdownCode({
+  className,
+  children,
+  node: _node,
+  ...props
+}: React.ComponentPropsWithoutRef<"code"> & { node?: unknown }) {
+  const isFencedBlock =
+    typeof className === "string" && /^language-/.test(className)
+  if (isFencedBlock) {
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    )
+  }
+  return (
+    <code
+      className={cn(
+        "rounded-md bg-muted/90 px-1.5 py-0.5 font-mono text-[0.85em] text-foreground wrap-anywhere",
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </code>
+  )
+}
+
+const markdownComponents: Components = {
+  pre: MarkdownPre,
+  code: MarkdownCode,
+}
+
+function markdownUrlTransform(url: string, key: string): string {
+  // Allow inline generated images saved as data URLs.
+  if (
+    key === "src" &&
+    /^data:image\/(?:png|jpe?g|webp|gif);base64,[a-z0-9+/=]+$/i.test(url)
+  ) {
+    return url
+  }
+  return defaultUrlTransform(url)
+}
+
+function MarkdownText({ content }: { content: string }) {
+  const normalizedContent = content
+    // (data:image/...;base64,ABC...) => ![Generated image](data:image/...;base64,ABC...)
+    .replace(
+      /\((data:image\/(?:png|jpe?g|webp|gif);base64,[a-z0-9+/=]+)\)/gi,
+      "![Generated image]($1)"
+    )
+    // bare data:image... on its own line => markdown image
+    .replace(
+      /(^|\n)(data:image\/(?:png|jpe?g|webp|gif);base64,[a-z0-9+/=]+)(?=\n|$)/gi,
+      "$1![Generated image]($2)"
+    )
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={markdownComponents}
+      urlTransform={markdownUrlTransform}
+    >
+      {normalizedContent}
+    </ReactMarkdown>
+  )
+}
+
+export const Markdown = memo(function Markdown({
   content,
   className,
   getChecklistInitial,
@@ -61,9 +159,7 @@ export function Markdown({
         "[&>blockquote]:border-l-2 [&>blockquote]:border-border [&>blockquote]:pl-3 [&>blockquote]:text-muted-foreground",
         "[&>hr]:border-border/60",
         "[&_a]:underline [&_a]:underline-offset-4 [&_a]:decoration-border [&_a:hover]:decoration-foreground",
-        "[&_code]:rounded-md [&_code]:bg-background/60 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em]",
-        "[&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:border [&_pre]:bg-background/60 [&_pre]:p-3 [&_pre]:text-xs",
-        "[&_pre_code]:bg-transparent [&_pre_code]:p-0",
+        "[&_img]:my-2 [&_img]:max-h-112 [&_img]:w-full [&_img]:rounded-xl [&_img]:border [&_img]:border-border/60 [&_img]:object-contain",
         // Table styling
         "[&_table]:w-full [&_table]:border-collapse [&_table]:text-sm",
         "[&_th]:border [&_th]:border-border/60 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:bg-muted/40",
@@ -75,5 +171,5 @@ export function Markdown({
       {rendered}
     </div>
   )
-}
+})
 

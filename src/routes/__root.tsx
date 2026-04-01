@@ -19,9 +19,10 @@ import {
 import { Button } from "@/components/ui/button"
 import { auth } from "@/lib/firebase"
 import { useAuth } from "@/hooks/useAuth"
-import { useModel, MODEL_GROUPS, type ModelId } from "@/contexts/ModelContext"
+import { useModel, MODEL_GROUPS, IMAGE_MODELS, type ImageModelId, type ModelId } from "@/contexts/ModelContext"
 import { useVoiceLiveModel } from "@/contexts/VoiceLiveModelContext"
 import { ProfileDialogProvider, useProfileDialog } from "@/contexts/ProfileDialogContext"
+import { DesktopTitleBar } from "@/components/DesktopTitleBar"
 import type { VoiceLiveModelChoice } from "@/config/geminiMedia"
 import { cn } from "@/lib/utils"
 
@@ -55,7 +56,14 @@ function SettingsDrawerPanel({
 }) {
   const { user } = useAuth()
   const { openPreferencesEditor } = useProfileDialog()
-  const { selectedModel, setSelectedModel, selectedSearchModel, setSelectedSearchModel } = useModel()
+  const {
+    selectedModel,
+    setSelectedModel,
+    selectedSearchModel,
+    setSelectedSearchModel,
+    selectedImageModel,
+    setSelectedImageModel,
+  } = useModel()
   const { voiceLiveModel, setVoiceLiveModel } = useVoiceLiveModel()
   const navigate = useNavigate()
 
@@ -95,6 +103,7 @@ function SettingsDrawerPanel({
     selectedSearchModel === null
       ? null
       : MODEL_GROUPS.flatMap((g) => g.models).find((m) => m.id === selectedSearchModel)
+  const selectedImageModelMeta = IMAGE_MODELS.find((m) => m.id === selectedImageModel)
 
   return (
     <div
@@ -226,6 +235,42 @@ function SettingsDrawerPanel({
                         <p className="text-xs text-muted-foreground mt-0.5">Gemma 3 27B (default)</p>
                       </button>
                     )}
+                  </div>
+
+                  <div className="pt-1 border-t border-border/40" />
+
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-1">
+                      Image generation
+                    </p>
+                    <div className="rounded-xl border border-border/60 overflow-hidden">
+                      <div className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left bg-muted/20">
+                        <span className="text-sm font-semibold">Image model</span>
+                        <span className="text-xs text-muted-foreground truncate max-w-36 sm:max-w-48">
+                          {selectedImageModelMeta?.name ?? "Select model"}
+                        </span>
+                      </div>
+                      <div className="border-t border-border/50 bg-muted/10 py-1">
+                        {IMAGE_MODELS.map((m) => (
+                          <button
+                            key={`image-${m.id}`}
+                            type="button"
+                            onClick={() => setSelectedImageModel(m.id as ImageModelId)}
+                            className="w-full px-3 py-2 text-left hover:bg-muted/40 transition-colors"
+                          >
+                            <span className="flex items-center justify-between gap-2">
+                              <span className="text-sm">{m.name.replace(/^Imagen\s*/i, "")}</span>
+                              {selectedImageModel === m.id && (
+                                <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                              )}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground px-1 leading-relaxed">
+                      Use in chat with <code>/image your prompt</code>.
+                    </p>
                   </div>
 
                   <div className="pt-1 border-t border-border/40" />
@@ -468,6 +513,7 @@ function RootLayout() {
 
   return (
     <div className="min-h-svh bg-background flex flex-col">
+      <DesktopTitleBar />
       {showMainChrome && (
         <header className="sticky top-0 z-40 bg-background/85 backdrop-blur-md border-b border-border/60 shrink-0">
           <div className="max-w-7xl mx-auto px-4 h-14 flex items-center gap-4">

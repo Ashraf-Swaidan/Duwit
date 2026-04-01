@@ -35,7 +35,7 @@ import {
   maybeCompressTaskChatIntoGoalState,
 } from "@/services/goalState"
 import { auth } from "@/lib/firebase"
-import { callAIStream, type WebGroundingInfo } from "@/services/ai"
+import { callAIStream, generateImage, type WebGroundingInfo } from "@/services/ai"
 import { generateTaskGuideSystemPrompt, generateTaskSuggestedPrompt } from "@/services/prompts"
 import { useModel } from "@/contexts/ModelContext"
 import { Markdown } from "@/components/Markdown"
@@ -124,6 +124,29 @@ function WebGroundingBlock({ info }: { info: WebGroundingInfo }) {
   )
 }
 
+function ImageGeneratingSkeleton({
+  model,
+  prompt,
+}: {
+  model: string
+  prompt: string
+}) {
+  return (
+    <div className="mt-2 rounded-2xl border border-border/70 bg-muted/20 p-3.5 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-muted-foreground">Generating image...</p>
+        <span className="text-[11px] text-muted-foreground">{model}</span>
+      </div>
+      <div className="h-56 w-full rounded-xl border border-border/60 bg-muted/50 animate-pulse" />
+      <div className="space-y-2">
+        <div className="h-2.5 w-4/5 rounded bg-muted animate-pulse" />
+        <div className="h-2.5 w-3/5 rounded bg-muted animate-pulse" />
+      </div>
+      <p className="text-[11px] text-muted-foreground line-clamp-2">{prompt}</p>
+    </div>
+  )
+}
+
 export function TaskChat({
   task,
   goalId,
@@ -144,7 +167,7 @@ export function TaskChat({
   goalState,
   onGoalStateUpdated,
 }: TaskChatProps) {
-  const { selectedModel, selectedSearchModel } = useModel()
+  const { selectedModel, selectedSearchModel, selectedImageModel } = useModel()
   const [focusMode, setFocusMode] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [youtubeMeta, setYoutubeMeta] = useState<Record<number, { youtubeSearches: string[]; channels: string[] }>>({})
@@ -269,6 +292,72 @@ export function TaskChat({
     }
 
     return { clean: clean || text, meta: { youtubeSearches, channels } }
+  }
+
+  function parseImageCommand(text: string): string | null {
+    const value = text.trim()
+    if (!value) return null
+    if (value.toLowerCase().startsWith("/image ")) return value.slice(7).trim()
+    if (value.toLowerCase().startsWith("/img ")) return value.slice(5).trim()
+    return null
+  }
+
+  function parseNaturalImageIntent(text: string): string | null {
+    const value = text.trim()
+    if (!value) return null
+    const lower = value.toLowerCase()
+    const patterns = [
+      /^(?:please\s+)?(?:can you|could you|would you)?\s*(?:generate|create|make|draw)\s+(?:an?\s+)?image\s+(?:of|about)\s+(.+)$/i,
+      /^(?:please\s+)?(?:can you|could you|would you)?\s*show me\s+(?:an?\s+)?image\s+(?:of|about)\s+(.+)$/i,
+      /^(?:please\s+)?(?:i want|i need)\s+(?:an?\s+)?image\s+(?:of|about)\s+(.+)$/i,
+    ]
+    for (const re of patterns) {
+      const match = value.match(re)
+      if (match?.[1]?.trim()) return match[1].trim()
+    }
+    if (lower.includes("generate an image") || lower.includes("create an image") || lower.includes("draw an image")) {
+      return value
+        .replace(/^(?:please\s+)?/i, "")
+        .replace(/^(?:can you|could you|would you)\s+/i, "")
+        .replace(/^(?:generate|create|make|draw)\s+(?:an?\s+)?image\s*(?:of|about)?\s*/i, "")
+        .trim() || null
+    }
+    return null
+  }
+
+  function parseImageRequestMarker(text: string): { cleaned: string; prompt: string | null } {
+    const regex = /\[IMAGE_REQUEST:\s*([^\]]+)\]/i
+    const match = text.match(regex)
+    if (!match) {
+      return { cleaned: text, prompt: null }
+    }
+    const prompt = match[1]?.trim() || null
+    const cleaned = text.replace(regex, "").trim()
+    return { cleaned, prompt }
+  }
+
+  function makeImageSkeletonMessage(prompt: string, model: string): string {
+    return `__IMAGE_GENERATING__::${model}::${prompt}`
+  }
+
+  function parseImageSkeletonMessage(content: string): { model: string; prompt: string } | null {
+    if (!content.startsWith("__IMAGE_GENERATING__::")) return null
+    const rest = content.slice("__IMAGE_GENERATING__::".length)
+    const sep = rest.indexOf("::")
+    if (sep === -1) return null
+    const model = rest.slice(0, sep).trim()
+    const prompt = rest.slice(sep + 2).trim()
+    if (!model || !prompt) return null
+    return { model, prompt }
+  }
+
+  function imageErrorMessage(err: unknown): string {
+    const raw = err instanceof Error ? err.message : String(err)
+    const lower = raw.toLowerCase()
+    if (lower.includes("400") || lower.includes("invalid argument") || lower.includes("model")) {
+      return `I couldn't generate the image with \`${selectedImageModel}\`.\n\n${raw}\n\nTry switching image model in Settings and retry.`
+    }
+    return "I couldn't generate the image right now, but I can still explain it in detail if you want."
   }
 
   function youtubeSearchUrl(q: string) {
@@ -550,6 +639,55 @@ export function TaskChat({
     setStreamingGrounding(null)
 
     try {
+      const imagePrompt = parseImageCommand(trimmed) ?? parseNaturalImageIntent(trimmed)
+      if (imagePrompt) {
+        const assistantIndex = updated.length
+        setMessages([
+          ...updated,
+          { role: "assistant", content: makeImageSkeletonMessage(imagePrompt, selectedImageModel) },
+        ])
+        let imageMsg: string
+        try {
+          const image = await generateImage({
+            prompt: imagePrompt,
+            modelName: selectedImageModel,
+          })
+          imageMsg = `Generated with \`${selectedImageModel}\`\n\n![${imagePrompt}](${image.dataUrl})`
+        } catch (err) {
+          imageMsg = imageErrorMessage(err)
+        }
+        const final: ChatMessage[] = [...updated, { role: "assistant", content: imageMsg }]
+        setMessages(final)
+        if (uid && chatHydrationReady) {
+          void saveTaskChat(uid, goalId, phaseIndex, taskIndex, final, undefined).catch(console.error)
+        }
+        if (uid) {
+          void touchGoalActivity(uid, goalId, phaseIndex, taskIndex)
+          void maybeCompressTaskChatIntoGoalState(
+            uid,
+            goalId,
+            goalTitle,
+            goalProfile,
+            phaseIndex,
+            taskIndex,
+            task.title,
+            final,
+            selectedModel,
+            userProfile,
+          )
+            .then((did) => {
+              if (did) onGoalStateUpdated?.()
+            })
+            .catch(() => {})
+        }
+        setMessageGrounding((prev) => {
+          const next = { ...prev }
+          delete next[assistantIndex]
+          return next
+        })
+        return
+      }
+
       const systemPrompt = buildCoachSystemPrompt()
 
       // XML-style tags make it harder for the model to pattern-match and
@@ -613,7 +751,57 @@ export function TaskChat({
       // Final: truncate hallucinated student turns, strip markers, parse duwit payload
       const cleanedResponse = truncateAtStudentTurn(response)
       const markerStripped = teaching.handleAIMarkers(cleanedResponse)
-      const parsed = parseDuwitPayload(markerStripped)
+      const { cleaned: imageSignalCleaned, prompt: markerImagePrompt } =
+        parseImageRequestMarker(markerStripped)
+      if (markerImagePrompt) {
+        const safePrompt = markerImagePrompt.slice(0, 400)
+        setMessages([
+          ...updated,
+          {
+            role: "assistant",
+            content: makeImageSkeletonMessage(safePrompt, selectedImageModel),
+          },
+        ])
+        const intro = imageSignalCleaned ? `${imageSignalCleaned}\n\n` : ""
+        let imageMsg: string
+        try {
+          const image = await generateImage({
+            prompt: safePrompt,
+            modelName: selectedImageModel,
+          })
+          imageMsg = `${intro}Generated with \`${selectedImageModel}\`\n\n![${safePrompt}](${image.dataUrl})`
+        } catch (err) {
+          imageMsg = `${intro}${imageErrorMessage(err)}`
+        }
+        const final: ChatMessage[] = [...updated, { role: "assistant", content: imageMsg }]
+        setMessages(final)
+        setWebSearchStreamPhase("idle")
+        setStreamingGrounding(null)
+        if (uid && chatHydrationReady) {
+          void saveTaskChat(uid, goalId, phaseIndex, taskIndex, final, undefined).catch(console.error)
+        }
+        if (uid) {
+          void touchGoalActivity(uid, goalId, phaseIndex, taskIndex)
+          void maybeCompressTaskChatIntoGoalState(
+            uid,
+            goalId,
+            goalTitle,
+            goalProfile,
+            phaseIndex,
+            taskIndex,
+            task.title,
+            final,
+            selectedModel,
+            userProfile,
+          )
+            .then((did) => {
+              if (did) onGoalStateUpdated?.()
+            })
+            .catch(() => {})
+        }
+        return
+      }
+      const parsed = parseDuwitPayload(imageSignalCleaned)
       if (parsed.meta) {
         setYoutubeMeta((prev) => ({ ...prev, [assistantIndex]: parsed.meta! }))
       }
@@ -967,6 +1155,8 @@ export function TaskChat({
             <div className="space-y-4">
               {messages.map((msg, i) => {
                 const isRtl = /[\u0600-\u06FF]/.test(msg.content)
+                const pendingImage = parseImageSkeletonMessage(msg.content)
+                const hasChecklistWidget = msg.content.includes('"type":"checklist"')
                 return (
                   <div
                     key={i}
@@ -979,15 +1169,26 @@ export function TaskChat({
                           dir={isRtl ? "rtl" : "ltr"}
                           className={`text-sm leading-7 text-foreground py-1 ${isRtl ? "text-right" : ""}`}
                         >
-                          <Markdown
-                            content={msg.content}
-                            className={isRtl ? "text-right" : undefined}
-                            getChecklistInitial={(slot) => checklistSelections[`${i}-${slot}`]}
-                            onChecklistChange={(slot, indices) =>
-                              handleChecklistChange(i, slot, indices)
-                            }
-                          />
-                          {msg.content.trim() !== "" && (
+                          {pendingImage ? (
+                            <ImageGeneratingSkeleton
+                              model={pendingImage.model}
+                              prompt={pendingImage.prompt}
+                            />
+                          ) : (
+                            <Markdown
+                              content={msg.content}
+                              className={isRtl ? "text-right" : undefined}
+                              {...(hasChecklistWidget
+                                ? {
+                                    getChecklistInitial: (slot: number) =>
+                                      checklistSelections[`${i}-${slot}`],
+                                    onChecklistChange: (slot: number, indices: number[]) =>
+                                      handleChecklistChange(i, slot, indices),
+                                  }
+                                : {})}
+                            />
+                          )}
+                          {!pendingImage && msg.content.trim() !== "" && (
                             <div className="mt-2 flex flex-wrap items-center gap-2">
                               {ttsSession?.index === i && ttsSession.phase === "loading" ? (
                                 <>

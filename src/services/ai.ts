@@ -27,6 +27,73 @@ export interface AICallOptions {
   enableWebSearch?: boolean
 }
 
+export interface ImageGenResult {
+  dataUrl: string
+  mimeType: string
+  model: string
+}
+
+function isPollinationsModel(modelName: string): boolean {
+  return modelName.startsWith("pollinations:")
+}
+
+function toDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error("Failed to read generated image bytes."))
+    reader.onload = () => resolve(String(reader.result))
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function generateImageWithPollinations(prompt: string, modelName: string): Promise<ImageGenResult> {
+  const model = modelName.replace("pollinations:", "").trim()
+  if (!model) throw new Error("Invalid Pollinations model name.")
+
+  const key = (import.meta.env.VITE_POLLINATIONS_API_KEY as string | undefined)?.trim()
+  if (!key) {
+    throw new Error(
+      "Missing Pollinations API key. Set VITE_POLLINATIONS_API_KEY in your environment."
+    )
+  }
+
+  const url = new URL(`https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}`)
+  url.searchParams.set("model", model)
+  url.searchParams.set("width", "1024")
+  url.searchParams.set("height", "1024")
+  const resp = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${key}`,
+    },
+  })
+
+  if (!resp.ok) {
+    let detail = ""
+    try {
+      const raw = (await resp.json()) as {
+        error?: { code?: string; message?: string }
+        message?: string
+      }
+      detail = raw.error?.message ?? raw.message ?? ""
+    } catch {
+      try {
+        detail = await resp.text()
+      } catch {
+        detail = ""
+      }
+    }
+    throw new Error(
+      `Pollinations image request failed: [${resp.status}] ${detail || resp.statusText || "Unknown error"}`
+    )
+  }
+
+  const blob = await resp.blob()
+  const mimeType = blob.type || "image/jpeg"
+  const dataUrl = await toDataUrl(blob)
+  return { dataUrl, mimeType, model: modelName }
+}
+
 function buildContents(prompt: string, systemPrompt?: string) {
   return systemPrompt
     ? [{ role: "user" as const, parts: [{ text: systemPrompt + "\n\n" + prompt }] }]
@@ -273,4 +340,19 @@ export async function callAIStructured<T = Record<string, unknown>>({
     console.log("=== ALL ATTEMPTS FAILED ===")
     throw new Error(`AI response is not valid JSON: ${e instanceof Error ? e.message : "Unknown error"}`)
   }
+}
+
+export async function generateImage({
+  prompt,
+  modelName,
+}: {
+  prompt: string
+  modelName: string
+}): Promise<ImageGenResult> {
+  if (isPollinationsModel(modelName)) {
+    return generateImageWithPollinations(prompt, modelName)
+  }
+  throw new Error(
+    `Unsupported image model "${modelName}". This app is configured for Pollinations image models only.`
+  )
 }
