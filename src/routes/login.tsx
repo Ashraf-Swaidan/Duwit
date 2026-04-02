@@ -1,6 +1,9 @@
 import { createFileRoute, useNavigate, Link, getRouteApi } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { AuthForm } from '@/components/AuthForm'
+import { LoginArtMotifs } from '@/components/LoginArtMotifs'
+import { LoginAtmosphere } from '@/components/LoginAtmosphere'
+import { LoginHeroText } from '@/components/LoginHeroText'
 import { useAuth } from '@/hooks/useAuth'
 import { Loader2, Sparkles } from 'lucide-react'
 
@@ -50,23 +53,9 @@ function LoginPage() {
   const isSignup = mode === 'signup'
 
   return (
-    <div className="relative min-h-svh flex flex-col overflow-hidden bg-background">
-      {/* Atmosphere */}
-      <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_90%_55%_at_50%_-15%,oklch(0.72_0.16_55/0.2),transparent)]"
-        aria-hidden
-      />
-      <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_80%_70%,oklch(0.93_0.06_70/0.5),transparent_55%)]"
-        aria-hidden
-      />
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.35] bg-[radial-gradient(circle_at_15%_40%,oklch(0.72_0.12_55/0.12),transparent_45%)]"
-        aria-hidden
-      />
-
-      <header className="relative z-10 shrink-0 border-b border-border/50 bg-background/70 backdrop-blur-md">
-        <div className="mx-auto grid h-14 max-w-2xl grid-cols-[1fr_auto_1fr] items-center gap-3 px-4">
+    <div className="relative flex min-h-0 w-full flex-1 flex-col overflow-x-hidden bg-background">
+      <header className="sticky top-0 z-30 shrink-0 border-b border-border/50 bg-background/90 backdrop-blur-md">
+        <div className="mx-auto grid h-14 w-full max-w-none grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 sm:px-6">
           <Link
             to="/"
             className="justify-self-start text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
@@ -75,7 +64,7 @@ function LoginPage() {
           </Link>
           <Link
             to="/"
-            className="font-black text-lg tracking-tight text-foreground hover:opacity-75 transition-opacity text-center"
+            className="text-center font-black text-lg tracking-tight text-foreground hover:opacity-75 transition-opacity"
           >
             Duwit
           </Link>
@@ -83,40 +72,44 @@ function LoginPage() {
         </div>
       </header>
 
-      <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-4 py-10 sm:px-6 sm:py-14">
-        <div className="w-full max-w-md flex flex-col items-center">
-          <div className="mb-8 flex flex-col items-center text-center space-y-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand/12 text-brand ring-1 ring-brand/25 shadow-sm">
-              <Sparkles className="h-6 w-6" strokeWidth={1.75} />
-            </div>
-            <div className="space-y-2 max-w-sm">
-              <h1
-                className="text-2xl sm:text-[1.65rem] font-semibold tracking-tight text-foreground leading-tight"
-                style={{ fontFamily: "'Fraunces', Georgia, serif" }}
-              >
-                {isSignup ? "Start your next chapter" : "Good to see you again"}
-              </h1>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                {isSignup
-                  ? "Create an account and Duwit will help you turn goals into a path—tasks, guidance, and quiet wins."
-                  : "Sign in to open your home chat, goals, and every plan you’ve already shaped."}
-              </p>
-            </div>
-          </div>
-
-          <div className="w-full flex justify-center">
-            <AuthForm
-              layout="embedded"
-              defaultMode={mode}
-              onSuccess={() => navigate({ to: sanitizeRedirect(redirect), replace: true })}
-            />
-          </div>
-
-          <p className="mt-10 text-center text-[11px] text-muted-foreground/80 max-w-xs leading-relaxed">
-            By continuing you agree to use Duwit responsibly. Your learning path stays private to your account.
+      <div className="flex min-h-0 flex-1 flex-col lg:min-h-[calc(100svh-3.5rem)] lg:flex-row">
+        {/* Form column */}
+        <section className="relative z-10 flex w-full flex-col justify-center border-border bg-background px-6 py-10 sm:px-10 lg:w-1/2 lg:border-r lg:py-14 lg:pl-12 lg:pr-10 xl:pl-16">
+          <p className="mb-6 flex items-start gap-2 text-sm font-medium leading-relaxed text-muted-foreground">
+            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-brand" strokeWidth={2} aria-hidden />
+            <span>
+              {isSignup
+                ? 'Create your account — then your goals get a path.'
+                : 'Welcome back — pick up where you left off.'}
+            </span>
           </p>
-        </div>
-      </main>
+
+          <AuthForm
+            layout="embedded"
+            defaultMode={mode}
+            onModeChange={(m) =>
+              navigate({
+                to: '/login',
+                search: { redirect, mode: m },
+                replace: true,
+              })
+            }
+            onSuccess={() => navigate({ to: sanitizeRedirect(redirect), replace: true })}
+          />
+
+          <p className="mt-10 max-w-sm text-[11px] leading-relaxed text-muted-foreground/80">
+            By continuing you agree to use Duwit responsibly. Your learning path stays private to your
+            account.
+          </p>
+        </section>
+
+        {/* Art / hero column */}
+        <section className="relative flex min-h-[min(46vh,400px)] w-full flex-col overflow-hidden border-border bg-muted/15 lg:min-h-0 lg:w-1/2 lg:flex-1 lg:self-stretch lg:border-l dark:bg-muted/10">
+          <LoginAtmosphere scope="container" />
+          <LoginArtMotifs />
+          <LoginHeroText />
+        </section>
+      </div>
     </div>
   )
 }

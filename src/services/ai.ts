@@ -33,6 +33,10 @@ export interface ImageGenResult {
   model: string
 }
 
+function isPollinationsTextModel(modelName: string): boolean {
+  return modelName.startsWith("pollinations-text:")
+}
+
 function isPollinationsModel(modelName: string): boolean {
   return modelName.startsWith("pollinations:")
 }
@@ -92,6 +96,70 @@ async function generateImageWithPollinations(prompt: string, modelName: string):
   const mimeType = blob.type || "image/jpeg"
   const dataUrl = await toDataUrl(blob)
   return { dataUrl, mimeType, model: modelName }
+}
+
+async function callPollinationsTextModel({
+  prompt,
+  systemPrompt,
+  modelName,
+  temperature,
+  maxOutputTokens,
+}: {
+  prompt: string
+  systemPrompt?: string
+  modelName: string
+  temperature?: number
+  maxOutputTokens?: number
+}): Promise<string> {
+  const model = modelName.replace("pollinations-text:", "").trim()
+  if (!model) throw new Error("Invalid Pollinations text model name.")
+  const key = (import.meta.env.VITE_POLLINATIONS_API_KEY as string | undefined)?.trim()
+  if (!key) {
+    throw new Error(
+      "Missing Pollinations API key. Set VITE_POLLINATIONS_API_KEY (use a publishable pk_ key in frontend apps)."
+    )
+  }
+  const messages: Array<{ role: "system" | "user"; content: string }> = []
+  if (systemPrompt?.trim()) messages.push({ role: "system", content: systemPrompt.trim() })
+  messages.push({ role: "user", content: prompt })
+
+  const body: Record<string, unknown> = { model, messages }
+  if (temperature !== undefined) body.temperature = temperature
+  if (maxOutputTokens !== undefined) body.max_tokens = maxOutputTokens
+
+  const resp = await fetch("https://gen.pollinations.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  })
+  if (!resp.ok) {
+    let detail = ""
+    try {
+      const raw = (await resp.json()) as {
+        error?: { code?: string; message?: string }
+        message?: string
+        success?: boolean
+      }
+      detail = raw.error?.message ?? raw.message ?? ""
+      if (!detail && raw.success === false) {
+        detail = JSON.stringify(raw)
+      }
+    } catch {
+      detail = await resp.text().catch(() => "")
+    }
+    throw new Error(
+      `Pollinations text request failed: [${resp.status}] ${detail || resp.statusText || "Unknown error"}`
+    )
+  }
+  const data = (await resp.json()) as {
+    choices?: Array<{ message?: { content?: string } }>
+  }
+  const text = data.choices?.[0]?.message?.content?.trim() ?? ""
+  if (!text) throw new Error("No text in Pollinations response")
+  return text
 }
 
 function buildContents(prompt: string, systemPrompt?: string) {
@@ -173,6 +241,15 @@ export async function callAI({
   modelName,
   enableWebSearch,
 }: AICallOptions): Promise<string> {
+  if (modelName && isPollinationsTextModel(modelName)) {
+    return callPollinationsTextModel({
+      prompt,
+      systemPrompt,
+      modelName,
+      temperature,
+      maxOutputTokens,
+    })
+  }
   const activeModel = modelName ? getModelInstance(modelName) : defaultModel
   try {
     const result = await activeModel.generateContent({
@@ -218,6 +295,18 @@ export async function callAIStream({
   /** Fired for search phase changes and merged grounding updates (queries / sources). */
   onStreamProgress?: (evt: WebStreamProgressEvent) => void
 }): Promise<AIStreamResult> {
+  if (modelName && isPollinationsTextModel(modelName)) {
+    onStreamProgress?.({ type: "phase", phase: "writing" })
+    const text = await callPollinationsTextModel({
+      prompt,
+      systemPrompt,
+      modelName,
+      temperature,
+      maxOutputTokens,
+    })
+    onChunk(text)
+    return { text, grounding: null }
+  }
   const activeModel = modelName ? getModelInstance(modelName) : defaultModel
   let result: Awaited<ReturnType<typeof activeModel.generateContentStream>>
   try {

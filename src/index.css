@@ -133,9 +133,31 @@
   }
   html {
     @apply font-sans;
-    scrollbar-gutter: auto;
+    /* Scroll lives in the app shell (`__root` outlet), not the document — avoid double gutters. */
+    scrollbar-gutter: unset;
   }
   body {
     @apply bg-background text-foreground antialiased;
+  }
+}
+
+/* Login hero: GPU-only sheen (no background-position on gradient text). */
+@keyframes login-hero-sheen {
+  0% {
+    transform: translate3d(-135%, 0, 0);
+  }
+  100% {
+    transform: translate3d(235%, 0, 0);
+  }
+}
+
+.login-hero-sheen {
+  animation: login-hero-sheen 5.2s ease-in-out infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-hero-sheen {
+    animation: none !important;
   }
 }

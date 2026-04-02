@@ -723,8 +723,8 @@ export function TaskChat({
         systemPrompt,
         temperature: focusMode ? 0.42 : 0.55,
         maxOutputTokens: focusMode ? 650 : 900,
-        modelName: "gemini-2.5-flash",
-        enableWebSearch: true,
+        modelName: selectedModel,
+        enableWebSearch: !selectedModel.startsWith("pollinations-text:"),
         onStreamProgress: (evt) => {
           if (evt.type === "phase") {
             setWebSearchStreamPhase(evt.phase)
@@ -1021,7 +1021,7 @@ export function TaskChat({
           )}
 
           {onNavigateTask && (
-            <div className="shrink-0 flex items-center gap-0.5 border-l border-border/60 pl-2 ml-1">
+            <div data-tour-id="task-chat-nav" className="shrink-0 flex items-center gap-0.5 border-l border-border/60 pl-2 ml-1">
               <button
                 disabled={!hasPrevTask}
                 onClick={() => onNavigateTask(-1)}
@@ -1624,7 +1624,7 @@ export function TaskChat({
               onTranscriptDelta={handleVoiceTranscriptDelta}
             />
           ) : (
-            <div className="flex gap-2 items-center bg-card border border-border/80 shadow-lg shadow-black/5 rounded-3xl px-4 py-2 focus-within:border-ring/40 focus-within:ring-2 focus-within:ring-ring/20 transition-all duration-200">
+            <div data-tour-id="task-chat-input" className="flex gap-2 items-center bg-card border border-border/80 shadow-lg shadow-black/5 rounded-3xl px-4 py-2 focus-within:border-ring/40 focus-within:ring-2 focus-within:ring-ring/20 transition-all duration-200">
               <textarea
                 ref={inputRef}
                 rows={1}

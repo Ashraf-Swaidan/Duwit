@@ -84,7 +84,7 @@ function PlanLoadingSkeleton({ onBack }: { onBack?: () => void }) {
               </div>
             </div>
 
-            <div className="space-y-3">
+            <div data-tour-id="plan-phases" className="space-y-3">
               {[0, 1].map((phase) => (
                 <div
                   key={phase}

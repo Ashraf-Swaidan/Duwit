@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { RequireAuth } from '@/components/RequireAuth'
 import { auth } from "@/lib/firebase"
 import { deleteGoal, getUserGoals, isGoalCompleted, type Goal } from "@/services/goals"
@@ -31,6 +31,12 @@ function completedSortMs(g: Goal) {
   return goalRecencyMs(g)
 }
 
+const GOALS_PAGE_SIZE = 12
+const INITIAL_GOALS_VISIBLE = 12
+
+const goalCardGridClass =
+  'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4'
+
 function GoalsPage() {
   const user = auth.currentUser
   const navigate = useNavigate()
@@ -38,6 +44,9 @@ function GoalsPage() {
   const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [vaultOpen, setVaultOpen] = useState(false)
+  const [activeVisible, setActiveVisible] = useState(INITIAL_GOALS_VISIBLE)
+  const [completedVisible, setCompletedVisible] = useState(INITIAL_GOALS_VISIBLE)
+  const prevVaultOpenRef = useRef(false)
 
   const { data: goals = [], isPending: goalsLoading } = useQuery({
     queryKey: ['goals', user?.uid],
@@ -56,6 +65,34 @@ function GoalsPage() {
     done.sort((a, b) => completedSortMs(b) - completedSortMs(a))
     return { activeGoals: active, completedGoals: done }
   }, [goals])
+
+  useEffect(() => {
+    if (activeGoals.length === 0) {
+      setActiveVisible(INITIAL_GOALS_VISIBLE)
+      return
+    }
+    setActiveVisible((v) => Math.min(v, activeGoals.length))
+  }, [activeGoals.length])
+
+  useEffect(() => {
+    if (completedGoals.length === 0) {
+      setCompletedVisible(INITIAL_GOALS_VISIBLE)
+      return
+    }
+    setCompletedVisible((v) => Math.min(v, completedGoals.length))
+  }, [completedGoals.length])
+
+  useEffect(() => {
+    if (prevVaultOpenRef.current && !vaultOpen) {
+      setCompletedVisible(INITIAL_GOALS_VISIBLE)
+    }
+    prevVaultOpenRef.current = vaultOpen
+  }, [vaultOpen])
+
+  const activeShown = activeGoals.slice(0, activeVisible)
+  const completedShown = completedGoals.slice(0, completedVisible)
+  const activeHasMore = activeGoals.length > activeVisible
+  const completedHasMore = completedGoals.length > completedVisible
 
   async function handleConfirmDelete() {
     if (!user || !pendingDelete) return
@@ -160,7 +197,7 @@ function GoalsPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 pt-8 pb-24 space-y-6">
+    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 sm:pr-20 lg:px-8 lg:pr-24 pt-8 pb-24 space-y-6">
       {/* Header — one row on all breakpoints; title + action share the baseline */}
       <div className="flex flex-row items-end justify-between gap-3 sm:gap-6">
         <div className="min-w-0 flex-1">
@@ -176,7 +213,7 @@ function GoalsPage() {
         </Button>
       </div>
 
-      <div className="flex gap-2.5 items-start rounded-xl border border-border/60 bg-muted/25 px-3 py-2.5 sm:px-3.5 sm:py-2 max-w-3xl">
+      <div className="flex gap-2.5 items-start rounded-xl border border-border/60 bg-muted/25 px-3 py-2.5 sm:px-3.5 sm:py-2 w-full max-w-4xl">
         <Map
           className="h-3.5 w-3.5 shrink-0 text-brand/75 mt-0.5"
           aria-hidden
@@ -226,7 +263,7 @@ function GoalsPage() {
               <Sparkles className="h-4 w-4 text-brand shrink-0" strokeWidth={2} />
               <h2 className="text-lg font-bold tracking-tight">What you’re still walking</h2>
             </div>
-            <p className="text-xs text-muted-foreground -mt-2 max-w-xl leading-relaxed">
+            <p className="text-xs text-muted-foreground -mt-2 max-w-2xl leading-relaxed">
               These are the threads that still want your attention — ordered by what you touched most
               recently.
             </p>
@@ -238,7 +275,27 @@ function GoalsPage() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-3">{activeGoals.map((g) => renderGoalCard(g, 'active'))}</div>
+              <div className="space-y-3">
+                <div className={goalCardGridClass}>
+                  {activeShown.map((g) => renderGoalCard(g, 'active'))}
+                </div>
+                {activeHasMore && (
+                  <div className="flex justify-center pt-1">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="rounded-full px-6"
+                      onClick={() =>
+                        setActiveVisible((v) =>
+                          Math.min(v + GOALS_PAGE_SIZE, activeGoals.length),
+                        )
+                      }
+                    >
+                      Show {Math.min(GOALS_PAGE_SIZE, activeGoals.length - activeVisible)} more
+                    </Button>
+                  </div>
+                )}
+              </div>
             )}
           </section>
 
@@ -272,7 +329,26 @@ function GoalsPage() {
                   <p className="text-[0.7rem] uppercase tracking-wider text-muted-foreground ps-4">
                     Archive of finished work — tap to reopen the full plan
                   </p>
-                  {completedGoals.map((g) => renderGoalCard(g, 'complete'))}
+                  <div className={goalCardGridClass}>
+                    {completedShown.map((g) => renderGoalCard(g, 'complete'))}
+                  </div>
+                  {completedHasMore && (
+                    <div className="flex justify-center pt-1">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="rounded-full px-6"
+                        onClick={() =>
+                          setCompletedVisible((v) =>
+                            Math.min(v + GOALS_PAGE_SIZE, completedGoals.length),
+                          )
+                        }
+                      >
+                        Show{' '}
+                        {Math.min(GOALS_PAGE_SIZE, completedGoals.length - completedVisible)} more
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
             </section>

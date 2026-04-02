@@ -486,7 +486,7 @@ function HomePage() {
       {/* Floating input */}
       <div className="sticky bottom-0 px-4 pb-2.5 sm:pb-5 pt-1.5 bg-linear-to-t from-background via-background/95 to-transparent">
         <div className="max-w-2xl mx-auto">
-          <div className="flex items-end gap-2 rounded-3xl border border-border/70 bg-card/95 backdrop-blur-md shadow-lg shadow-black/5 px-3 py-2 focus-within:border-brand/40 focus-within:ring-2 focus-within:ring-brand/15 transition-all">
+          <div data-tour-id="home-chat-input" className="flex items-end gap-2 rounded-3xl border border-border/70 bg-card/95 backdrop-blur-md shadow-lg shadow-black/5 px-3 py-2 focus-within:border-brand/40 focus-within:ring-2 focus-within:ring-brand/15 transition-all">
           <textarea
             ref={inputRef}
             value={input}

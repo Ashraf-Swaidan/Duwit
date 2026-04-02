@@ -16,6 +16,16 @@ export const MODEL_GROUPS = [
       { id: "gemma-3-27b-it", name: "Gemma 3 27B", description: "Default · Free tier" },
     ],
   },
+  {
+    label: "Pollinations",
+    models: [
+      {
+        id: "pollinations-text:nova-fast",
+        name: "Amazon Nova Micro",
+        description: "Ultra fast & cheap — Pollinations id: nova-fast",
+      },
+    ],
+  },
 ] as const
 
 export const AVAILABLE_MODELS = MODEL_GROUPS.flatMap((g) => g.models)
@@ -26,6 +36,12 @@ export const IMAGE_MODELS = [
 
 export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"]
 export type ImageModelId = (typeof IMAGE_MODELS)[number]["id"]
+
+/** Old ids → current id (persisted in localStorage). */
+const LEGACY_TEXT_MODEL_IDS: Record<string, ModelId> = {
+  "pollinations-text:qwen3guard-8b": "pollinations-text:nova-fast",
+  "pollinations-text:qwen-safety": "pollinations-text:nova-fast",
+}
 
 const DEFAULT_MODEL: ModelId = "gemma-3-27b-it"
 const DEFAULT_IMAGE_MODEL: ImageModelId = "pollinations:flux"
@@ -56,8 +72,9 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   const [selectedModel, setSelectedModelState] = useState<ModelId>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY)
+      const normalized = LEGACY_TEXT_MODEL_IDS[stored ?? ""] ?? stored
       const valid = AVAILABLE_MODELS.map((m) => m.id) as string[]
-      return (valid.includes(stored ?? "") ? stored : DEFAULT_MODEL) as ModelId
+      return (valid.includes(normalized ?? "") ? normalized : DEFAULT_MODEL) as ModelId
     } catch {
       return DEFAULT_MODEL
     }
@@ -66,8 +83,9 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     try {
       const stored = localStorage.getItem(SEARCH_MODEL_STORAGE_KEY)
       if (!stored || stored === "__same__") return null
+      const normalized = LEGACY_TEXT_MODEL_IDS[stored] ?? stored
       const valid = AVAILABLE_MODELS.map((m) => m.id) as string[]
-      return (valid.includes(stored) ? stored : null) as ModelId | null
+      return (valid.includes(normalized) ? normalized : null) as ModelId | null
     } catch {
       return null
     }

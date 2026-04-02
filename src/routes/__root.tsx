@@ -1,7 +1,8 @@
 import { createRootRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { signOut } from "firebase/auth"
+import { useQuery } from "@tanstack/react-query"
 import {
   Check,
   Settings,
@@ -15,6 +16,7 @@ import {
   SlidersHorizontal,
   MoreVertical,
   Pencil,
+  RotateCcw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -24,8 +26,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { auth } from "@/lib/firebase"
+import { getUserGoals } from "@/services/goals"
 import { useAuth } from "@/hooks/useAuth"
-import { useModel, MODEL_GROUPS, IMAGE_MODELS, type ImageModelId, type ModelId } from "@/contexts/ModelContext"
+import { useModel, AVAILABLE_MODELS, IMAGE_MODELS, type ImageModelId, type ModelId } from "@/contexts/ModelContext"
 import { useVoiceLiveModel } from "@/contexts/VoiceLiveModelContext"
 import { ProfileDialogProvider, useProfileDialog } from "@/contexts/ProfileDialogContext"
 import { DesktopTitleBar } from "@/components/DesktopTitleBar"
@@ -54,10 +57,472 @@ const VOICE_LIVE_OPTIONS: {
 ]
 
 const MOBILE_SWIPE_HINT_KEY = "duwit_mobile_swipe_nav_hint_seen_v2"
+/** v1 legacy — bump so users who "finished" while the tour was disabled get one fresh pass */
+const ONBOARDING_DONE_KEY = "duwit_focus_onboarding_done_v2"
 
 function isMobileViewport() {
   if (typeof window === "undefined") return false
   return window.matchMedia("(max-width: 639px)").matches
+}
+
+type OnboardingStep = {
+  id: string
+  routePrefix: string
+  targetId?: string
+  fallbackTargetId?: string
+  title: string
+  body: string
+  actionLabel?: string
+  actionTo?: string
+  waitForTarget?: boolean
+}
+
+function routeMatches(prefix: string, path: string) {
+  return prefix === path || path.startsWith(prefix)
+}
+
+/** First tour step index that matches the current URL so the tour can catch up if the user navigated ahead. */
+function getMinStepIndexForPath(pathname: string): number {
+  if (pathname.startsWith("/plan/")) return 4
+  if (pathname === "/new-goal") return 2
+  if (pathname === "/app" || pathname === "/goals") return 0
+  return 0
+}
+
+function getScreenLabel(pathname: string): string {
+  if (pathname.startsWith("/plan/")) return "your plan"
+  if (pathname === "/new-goal") return "New goal"
+  if (pathname === "/goals") return "Goals"
+  if (pathname === "/app") return "Home"
+  return "this screen"
+}
+
+function renderWrongRouteHint(step: OnboardingStep, currentPath: string): ReactNode {
+  const here = getScreenLabel(currentPath)
+  if (step.routePrefix === "/app") {
+    if (currentPath.startsWith("/plan/")) {
+      return (
+        <>
+          You&apos;re viewing <strong className="text-amber-200/95">your plan</strong>. For this step, open{" "}
+          <strong className="text-amber-200/95">Home</strong> from the side rail.
+        </>
+      )
+    }
+    if (currentPath === "/new-goal") {
+      return (
+        <>
+          You&apos;re in <strong className="text-amber-200/95">New goal</strong>. This step is on{" "}
+          <strong className="text-amber-200/95">Home</strong> — switch there to continue.
+        </>
+      )
+    }
+    if (currentPath === "/goals") {
+      return (
+        <>
+          You&apos;re on <strong className="text-amber-200/95">Goals</strong>. Open{" "}
+          <strong className="text-amber-200/95">Home</strong> to continue this step.
+        </>
+      )
+    }
+    return (
+      <>
+        You&apos;re on {here}. Open <strong className="text-amber-200/95">Home</strong> to continue this step.
+      </>
+    )
+  }
+  if (step.routePrefix === "/new-goal") {
+    if (currentPath === "/app" || currentPath === "/goals") {
+      return (
+        <>
+          You&apos;re on <strong className="text-amber-200/95">{here}</strong>. Tap{" "}
+          <strong className="text-amber-200/95">New</strong> in the rail to open the goal builder.
+        </>
+      )
+    }
+    if (currentPath.startsWith("/plan/")) {
+      return (
+        <>
+          You&apos;re on <strong className="text-amber-200/95">your plan</strong>. Use{" "}
+          <strong className="text-amber-200/95">New</strong> or return to <strong className="text-amber-200/95">Home</strong> when
+          you&apos;re ready to follow this step.
+        </>
+      )
+    }
+    return (
+      <>
+        You&apos;re on {here}. Open <strong className="text-amber-200/95">New goal</strong> to continue.
+      </>
+    )
+  }
+  if (step.routePrefix === "/plan/") {
+    if (currentPath === "/app" || currentPath === "/goals" || currentPath === "/new-goal") {
+      return (
+        <>
+          You&apos;re on <strong className="text-amber-200/95">{here}</strong>. Open a goal from{" "}
+          <strong className="text-amber-200/95">Goals</strong> (or finish building one) to reach your plan.
+        </>
+      )
+    }
+    return (
+      <>
+        You&apos;re on {here}. Open an existing goal from <strong className="text-amber-200/95">Goals</strong> to view its
+        plan.
+      </>
+    )
+  }
+  return <>Move to the right screen for this step.</>
+}
+
+function buildStepDisplay(step: OnboardingStep, nickname: string | undefined): { title: string; body: string } {
+  if (step.id === "home-intro" && nickname?.trim()) {
+    return {
+      title: `Nice to meet you, ${nickname.trim()} — this is your command center.`,
+      body: step.body,
+    }
+  }
+  return { title: step.title, body: step.body }
+}
+
+function getVisibleTourElement(targetId: string): HTMLElement | null {
+  const list = Array.from(document.querySelectorAll<HTMLElement>(`[data-tour-id="${targetId}"]`))
+  for (const el of list) {
+    const rect = el.getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0) return el
+  }
+  return null
+}
+
+function FocusedOnboarding({
+  enabled,
+  currentPath,
+}: {
+  enabled: boolean
+  currentPath: string
+}) {
+  const { user } = useAuth()
+  const { profile } = useProfileDialog()
+  const navigate = useNavigate()
+  const [active, setActive] = useState(false)
+  const [stepIndex, setStepIndex] = useState(0)
+  const [targetRect, setTargetRect] = useState<DOMRect | null>(null)
+  const [tourEntryPath, setTourEntryPath] = useState<string | null>(null)
+
+  const { data: goals = [] } = useQuery({
+    queryKey: ["goals", "onboarding", user?.uid],
+    queryFn: () => (user ? getUserGoals(user.uid) : Promise.resolve([])),
+    enabled: !!user && active,
+  })
+
+  const firstGoalCreated = goals.length > 0
+
+  const steps: OnboardingStep[] = [
+    {
+      id: "home-intro",
+      routePrefix: "/app",
+      targetId: "home-chat-input",
+      title: "This is your command center.",
+      body: "Tell Duwit your goal in plain language. It will convert intent into practical next actions.",
+      actionLabel: "Continue",
+      waitForTarget: true,
+    },
+    {
+      id: "go-to-new-goal",
+      routePrefix: "/app",
+      targetId: "nav-new-goal",
+      title: "Now we build your first goal.",
+      body: "Use New to open the guided goal builder. I will stay with you until your first goal is created.",
+      actionLabel: "Open New Goal",
+      actionTo: "/new-goal",
+      waitForTarget: true,
+    },
+    {
+      id: "goal-chat",
+      routePrefix: "/new-goal",
+      targetId: "goal-chat-input",
+      title: "Describe what you want to achieve.",
+      body: "Start chatting here. The assistant asks questions, sharpens scope, then prepares a plan.",
+      actionLabel: "Continue",
+      waitForTarget: true,
+    },
+    {
+      id: "wait-first-goal",
+      routePrefix: "/new-goal",
+      targetId: "goal-build-plan",
+      fallbackTargetId: "goal-chat-input",
+      title: "When this appears, tap Build Plan.",
+      body: "Keep chatting until the assistant says the plan is ready. Then tap Build Plan — it creates your first goal and opens the roadmap.",
+      actionLabel: "I will do it now",
+      waitForTarget: true,
+    },
+    {
+      id: "plan-overview",
+      routePrefix: "/plan/",
+      targetId: "plan-phases",
+      title: "This is your roadmap.",
+      body: "Each phase contains tasks. Completing tasks updates progress and keeps the assistant aligned with your journey.",
+      actionLabel: "Continue",
+      waitForTarget: true,
+    },
+    {
+      id: "task-navigation",
+      routePrefix: "/plan/",
+      targetId: "task-chat-nav",
+      fallbackTargetId: "plan-phases",
+      title: "Move task to task here.",
+      body: "Open any task chat from the plan, then use these arrows to move forward or backward without losing context.",
+      actionLabel: "Continue",
+      waitForTarget: true,
+    },
+    {
+      id: "task-coach",
+      routePrefix: "/plan/",
+      targetId: "task-chat-input",
+      fallbackTargetId: "plan-phases",
+      title: "Task chat adapts to your progress.",
+      body: "This coach remembers your goal state, what you completed, and what you struggled with. Ask for help exactly where you are stuck.",
+      actionLabel: "Finish onboarding",
+      waitForTarget: true,
+    },
+  ]
+
+  const step = steps[Math.min(stepIndex, steps.length - 1)]
+  const atLastStep = stepIndex >= steps.length - 1
+  const routeOk = routeMatches(step.routePrefix, currentPath)
+  const hasAnyTargetId = Boolean(step.targetId || step.fallbackTargetId)
+  const missingTarget = hasAnyTargetId && !targetRect
+  const canProceed = routeOk && (!step.waitForTarget || !missingTarget)
+
+  const startedMidTour = tourEntryPath !== null && getMinStepIndexForPath(tourEntryPath) >= 2
+  const showMidTourHint =
+    startedMidTour && routeOk && (step.id === "goal-chat" || step.id === "wait-first-goal")
+  const { title: displayTitle, body: displayBody } = buildStepDisplay(step, profile?.nickname)
+
+  useLayoutEffect(() => {
+    if (!active) {
+      setTourEntryPath(null)
+      return
+    }
+    setTourEntryPath((p) => p ?? currentPath)
+  }, [active, currentPath])
+
+  useEffect(() => {
+    if (!enabled || !user) {
+      setActive(false)
+      return
+    }
+    try {
+      if (localStorage.getItem(ONBOARDING_DONE_KEY) === "1") {
+        setActive(false)
+        return
+      }
+      // Refresh behavior: if onboarding is not finished/skipped, always restart from step 0.
+      setStepIndex(0)
+      setActive(true)
+    } catch {
+      setActive(true)
+      setStepIndex(0)
+    }
+  }, [enabled, user])
+
+  useEffect(() => {
+    if (!active) return
+    const m = getMinStepIndexForPath(currentPath)
+    setStepIndex((i) => Math.max(i, m))
+  }, [active, currentPath])
+
+  useEffect(() => {
+    if (!active) return
+    if (step.id === "wait-first-goal" && firstGoalCreated && currentPath.startsWith("/plan/")) {
+      setStepIndex((s) => Math.min(s + 1, steps.length - 1))
+    }
+  }, [active, step.id, firstGoalCreated, currentPath, steps.length])
+
+  useEffect(() => {
+    if (!active) return
+    if (step.actionTo && currentPath === step.actionTo) {
+      setStepIndex((s) => Math.min(s + 1, steps.length - 1))
+    }
+  }, [active, step.actionTo, currentPath, steps.length])
+
+  useEffect(() => {
+    const preferredId = step.targetId ?? step.fallbackTargetId
+    if (!active || !preferredId || !routeOk) {
+      setTargetRect(null)
+      return
+    }
+    function updateRect() {
+      const primary = step.targetId ? getVisibleTourElement(step.targetId) : null
+      const fallback = step.fallbackTargetId ? getVisibleTourElement(step.fallbackTargetId) : null
+      const el = primary ?? fallback
+      setTargetRect(el ? el.getBoundingClientRect() : null)
+    }
+    updateRect()
+    const iv = window.setInterval(updateRect, 140)
+    const onResize = () => updateRect()
+    window.addEventListener("resize", onResize)
+    window.addEventListener("scroll", onResize, true)
+    return () => {
+      window.clearInterval(iv)
+      window.removeEventListener("resize", onResize)
+      window.removeEventListener("scroll", onResize, true)
+    }
+  }, [active, routeOk, step.targetId, step.fallbackTargetId])
+
+  function finishOnboarding() {
+    setActive(false)
+    try {
+      localStorage.setItem(ONBOARDING_DONE_KEY, "1")
+    } catch {}
+  }
+
+  function restartOnboarding() {
+    setTourEntryPath(null)
+    setActive(true)
+    setStepIndex(0)
+    try {
+      localStorage.removeItem(ONBOARDING_DONE_KEY)
+    } catch {}
+  }
+
+  function nextStep() {
+    if (!canProceed) return
+    if (step.actionTo && currentPath !== step.actionTo) {
+      navigate({ to: step.actionTo })
+      return
+    }
+    if (atLastStep) {
+      finishOnboarding()
+      return
+    }
+    setStepIndex((s) => Math.min(s + 1, steps.length - 1))
+  }
+
+  if (!active) return null
+
+  const pad = 10
+  const hole = targetRect
+    ? {
+        top: Math.max(0, targetRect.top - pad),
+        left: Math.max(0, targetRect.left - pad),
+        right: Math.min(window.innerWidth, targetRect.right + pad),
+        bottom: Math.min(window.innerHeight, targetRect.bottom + pad),
+      }
+    : null
+
+  const CARD_W = 360
+  const CARD_H = 220
+  const GAP = 22
+  const isGoalCreationFlow = currentPath.startsWith("/new-goal")
+
+  const pickCardPos = () => {
+    if (isGoalCreationFlow) {
+      return {
+        right: 12,
+        top: 12,
+      }
+    }
+    if (!hole) {
+      return { right: 12, top: 12 }
+    }
+    const focusRect = hole
+    const left = Math.max(12, Math.min(window.innerWidth - CARD_W - 12, focusRect.left))
+    const belowTop = focusRect.bottom + GAP
+    const aboveTop = focusRect.top - GAP - CARD_H
+    const canFitBelow = belowTop + CARD_H <= window.innerHeight - 12
+    const canFitAbove = aboveTop >= 12
+
+    function overlapsHole(cardTop: number) {
+      const cardBottom = cardTop + CARD_H
+      return cardBottom > focusRect.top && cardTop < focusRect.bottom
+    }
+
+    let top = canFitBelow ? belowTop : canFitAbove ? aboveTop : Math.min(window.innerHeight - CARD_H - 12, belowTop)
+    if (overlapsHole(top)) {
+      if (canFitAbove && aboveTop >= 12) top = aboveTop
+      else if (canFitBelow) top = belowTop
+    }
+    if (overlapsHole(top)) {
+      top = Math.max(12, Math.min(window.innerHeight - CARD_H - 12, focusRect.top - CARD_H - GAP))
+    }
+    return { left, top }
+  }
+
+  const cardStyle = pickCardPos()
+  const shouldHighlightTarget = Boolean(step.waitForTarget && hole && routeOk)
+
+  return (
+    <div className="fixed inset-0 z-85 pointer-events-none">
+      {shouldHighlightTarget && hole ? (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: [0.35, 0.55, 0.35], scale: [1, 1.01, 1] }}
+            transition={{ duration: 3.2, ease: "easeInOut", repeat: Infinity }}
+            className="absolute rounded-xl border border-brand/60 shadow-[0_0_0_1px_rgba(255,255,255,0.22),0_0_18px_rgba(99,102,241,0.18)] pointer-events-none"
+            style={{ top: hole.top, left: hole.left, width: hole.right - hole.left, height: hole.bottom - hole.top }}
+          />
+        </>
+      ) : null}
+
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.22 }}
+        className="absolute w-[min(92vw,22rem)] rounded-2xl border border-white/20 bg-zinc-950/94 text-white p-4 shadow-2xl pointer-events-auto"
+        style={cardStyle}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <img src="/logo.svg" alt="Duwit" className="h-5 w-5 shrink-0" />
+            <p className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wide truncate">
+              Quick tour ({stepIndex + 1}/{steps.length})
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={restartOnboarding}
+            className="h-7 w-7 rounded-full border border-white/15 text-zinc-200 hover:bg-white/10 flex items-center justify-center"
+            title="Restart tutorial"
+            aria-label="Restart tutorial"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <p className="mt-2 text-sm font-semibold leading-snug">{displayTitle}</p>
+        <p className="mt-1.5 text-xs text-zinc-300 leading-relaxed">{displayBody}</p>
+        {showMidTourHint && (
+          <p className="mt-2 text-[11px] text-emerald-300/95 leading-snug">
+            You opened this flow directly — we&apos;re aligned with where you are.
+          </p>
+        )}
+        {!routeOk && (
+          <p className="mt-2 text-[11px] text-amber-300 leading-snug">{renderWrongRouteHint(step, currentPath)}</p>
+        )}
+        {step.waitForTarget && missingTarget && routeOk && (
+          <p className="mt-2 text-[11px] text-amber-300">
+            Waiting for this section to appear...
+          </p>
+        )}
+        <div className="mt-3 flex justify-between gap-2">
+          <button
+            type="button"
+            onClick={finishOnboarding}
+            className="h-8 px-3 rounded-lg text-xs font-semibold border border-white/20 text-zinc-300 hover:bg-white/10"
+          >
+            Skip tour
+          </button>
+          <button
+            type="button"
+            onClick={nextStep}
+            disabled={!canProceed}
+            className="h-8 px-3 rounded-lg text-xs font-semibold bg-white text-zinc-900 disabled:opacity-45"
+          >
+            {step.actionLabel ?? "Next"}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  )
 }
 
 function SettingsDrawerPanel({
@@ -113,9 +578,11 @@ function SettingsDrawerPanel({
   const displayName = user?.displayName?.trim() || user?.email?.split("@")[0] || "User"
   const email = user?.email ?? ""
   const initial = (displayName[0] || email[0] || "?").toUpperCase()
-  const geminiModels = MODEL_GROUPS.find((g) => g.label === "Gemini")?.models ?? []
-  const gemmaModel = MODEL_GROUPS.find((g) => g.label === "Gemma")?.models[0]
-  const textModelOptions = [...geminiModels, ...(gemmaModel ? [gemmaModel] : [])]
+  const textModelOptions = AVAILABLE_MODELS as ReadonlyArray<{
+    id: ModelId
+    name: string
+    description: string
+  }>
 
   return (
     <motion.div
@@ -348,6 +815,7 @@ function SettingsDrawerPanel({
 
 function RootLayout() {
   const { user, loading: authLoading } = useAuth()
+  const { tutorialCanStart } = useProfileDialog()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [showMobileSwipeHint, setShowMobileSwipeHint] = useState(false)
@@ -465,6 +933,15 @@ function RootLayout() {
                   key={to}
                   type="button"
                   onClick={() => navigate({ to })}
+                  data-tour-id={
+                    to === "/new-goal"
+                      ? "nav-new-goal"
+                      : to === "/goals"
+                        ? "nav-goals"
+                        : to === "/app"
+                          ? "nav-home"
+                          : undefined
+                  }
                   className={`h-10 w-10 rounded-xl flex items-center justify-center transition-colors ${
                     isActive
                       ? "bg-white text-zinc-900"
@@ -501,6 +978,15 @@ function RootLayout() {
                         key={to}
                         type="button"
                         onClick={() => navigate({ to })}
+                        data-tour-id={
+                          to === "/new-goal"
+                            ? "nav-new-goal"
+                            : to === "/goals"
+                              ? "nav-goals"
+                              : to === "/app"
+                                ? "nav-home"
+                                : undefined
+                        }
                         className={`h-11 rounded-xl flex items-center justify-center gap-1.5 text-xs font-medium transition-colors ${
                           isActive
                             ? "bg-primary text-primary-foreground"
@@ -620,6 +1106,15 @@ function RootLayout() {
                         navigate({ to })
                         setMobileNavOpen(false)
                       }}
+                      data-tour-id={
+                        to === "/new-goal"
+                          ? "nav-new-goal"
+                          : to === "/goals"
+                            ? "nav-goals"
+                            : to === "/app"
+                              ? "nav-home"
+                              : undefined
+                      }
                       className={`h-10 w-28 px-3 justify-start gap-2 rounded-xl flex items-center transition-colors ${
                         isActive
                           ? "bg-white text-zinc-900"
@@ -652,6 +1147,8 @@ function RootLayout() {
           )}
         </>
       )}
+
+      <FocusedOnboarding enabled={tutorialCanStart} currentPath={currentPath} />
 
       {settingsOpen && (
         <div

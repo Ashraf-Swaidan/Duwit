@@ -14,17 +14,24 @@ type AuthMode = "login" | "signup"
 
 interface AuthFormProps {
   onSuccess?: () => void
+  /** Sync URL or parent state when switching sign-in vs sign-up (e.g. `?mode=`). */
+  onModeChange?: (mode: AuthMode) => void
   /**
    * `page` — full-viewport centered with wordmark (standalone auth screen).
    * `split` — width-constrained block, no wordmark (legacy / side panels).
-   * `embedded` — card only; parent page supplies chrome and headline.
+   * `embedded` — flat panel; parent page supplies layout (e.g. split column).
    */
   layout?: "page" | "split" | "embedded"
   /** Initial tab when mounting (e.g. from `/login?mode=signup`). */
   defaultMode?: AuthMode
 }
 
-export function AuthForm({ onSuccess, layout = "page", defaultMode = "login" }: AuthFormProps) {
+export function AuthForm({
+  onSuccess,
+  onModeChange,
+  layout = "page",
+  defaultMode = "login",
+}: AuthFormProps) {
   const [mode, setMode] = useState<AuthMode>(defaultMode)
 
   useEffect(() => {
@@ -70,6 +77,11 @@ export function AuthForm({ onSuccess, layout = "page", defaultMode = "login" }: 
   const embedded = layout === "embedded"
   const showWordmark = layout === "page"
 
+  const embeddedFieldClass =
+    "w-full h-11 rounded-lg border border-input bg-background px-3.5 text-sm transition-[color,box-shadow,border-color] placeholder:text-muted-foreground/65 focus-visible:outline-none focus-visible:border-brand/60 focus-visible:ring-2 focus-visible:ring-brand/20 dark:bg-background/80"
+  const defaultFieldClass =
+    "w-full rounded-xl border bg-transparent px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40 transition-all"
+
   return (
     <div
       className={cn(
@@ -78,7 +90,13 @@ export function AuthForm({ onSuccess, layout = "page", defaultMode = "login" }: 
         showWordmark && "min-h-svh flex flex-col items-center justify-center px-5 bg-background",
       )}
     >
-      <div className={cn("w-full space-y-8", showWordmark && "max-w-sm", embedded && "max-w-[420px] mx-auto")}>
+      <div
+        className={cn(
+          "w-full space-y-8",
+          showWordmark && "max-w-sm",
+          embedded && "max-w-md",
+        )}
+      >
         {showWordmark && (
           <div className="text-center space-y-1">
             <h1 className="text-5xl font-black tracking-tight">Duwit</h1>
@@ -86,25 +104,64 @@ export function AuthForm({ onSuccess, layout = "page", defaultMode = "login" }: 
           </div>
         )}
 
-        {/* Form card */}
+        {/* Form panel */}
         <div
           className={cn(
-            "rounded-3xl border p-7 space-y-5 transition-shadow",
-            embedded
-              ? "bg-card/95 border-border/80 shadow-lg shadow-brand/5 ring-1 ring-brand/10 backdrop-blur-sm"
-              : "bg-card border-border/80 shadow-sm",
+            "space-y-5 transition-shadow",
+            embedded ? "rounded-none border-0 bg-transparent p-0 shadow-none" : "rounded-3xl border bg-card border-border/80 p-7 shadow-sm",
           )}
         >
-          <div className="space-y-1">
-            <h2 className="font-bold text-lg">
-              {mode === "login" ? "Welcome back" : "Create your account"}
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              {mode === "login"
-                ? "Sign in to continue where you left off."
-                : "Set up your account in seconds."}
-            </p>
-          </div>
+          {embedded ? (
+            <div role="tablist" aria-label="Account" className="flex gap-10 border-b border-border">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "login"}
+                onClick={() => {
+                  setMode("login")
+                  setError(null)
+                  onModeChange?.("login")
+                }}
+                className={cn(
+                  "-mb-px border-b-2 pb-3 text-sm font-semibold transition-colors",
+                  mode === "login"
+                    ? "border-brand text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Sign in
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === "signup"}
+                onClick={() => {
+                  setMode("signup")
+                  setError(null)
+                  onModeChange?.("signup")
+                }}
+                className={cn(
+                  "-mb-px border-b-2 pb-3 text-sm font-semibold transition-colors",
+                  mode === "signup"
+                    ? "border-brand text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Sign up
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <h2 className="font-bold text-lg">
+                {mode === "login" ? "Welcome back" : "Create your account"}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {mode === "login"
+                  ? "Sign in to continue where you left off."
+                  : "Set up your account in seconds."}
+              </p>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {mode === "signup" && (
@@ -112,7 +169,7 @@ export function AuthForm({ onSuccess, layout = "page", defaultMode = "login" }: 
                 <label className="text-sm font-medium">Your name</label>
                 <input
                   type="text"
-                  className="w-full rounded-xl border bg-transparent px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40 transition-all"
+                  className={embedded ? embeddedFieldClass : defaultFieldClass}
                   placeholder="Alex Smith"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
@@ -125,7 +182,7 @@ export function AuthForm({ onSuccess, layout = "page", defaultMode = "login" }: 
               <label className="text-sm font-medium">Email</label>
               <input
                 type="email"
-                className="w-full rounded-xl border bg-transparent px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40 transition-all"
+                className={embedded ? embeddedFieldClass : defaultFieldClass}
                 placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -137,7 +194,7 @@ export function AuthForm({ onSuccess, layout = "page", defaultMode = "login" }: 
               <label className="text-sm font-medium">Password</label>
               <input
                 type="password"
-                className="w-full rounded-xl border bg-transparent px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/40 transition-all"
+                className={embedded ? embeddedFieldClass : defaultFieldClass}
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -154,7 +211,10 @@ export function AuthForm({ onSuccess, layout = "page", defaultMode = "login" }: 
             <Button
               type="submit"
               disabled={loading}
-              className="w-full h-11 rounded-xl text-sm font-semibold"
+              className={cn(
+                "w-full text-sm font-semibold",
+                embedded ? "h-11 rounded-lg" : "h-11 rounded-xl",
+              )}
             >
               {loading
                 ? mode === "login"
@@ -166,29 +226,33 @@ export function AuthForm({ onSuccess, layout = "page", defaultMode = "login" }: 
             </Button>
           </form>
 
-          <div className="text-center text-sm text-muted-foreground">
-            {mode === "login" ? (
-              <>
-                No account?{" "}
-                <button
-                  onClick={() => { setMode("signup"); setError(null) }}
-                  className="font-semibold text-foreground hover:underline underline-offset-4"
-                >
-                  Sign up free
-                </button>
-              </>
-            ) : (
-              <>
-                Already have one?{" "}
-                <button
-                  onClick={() => { setMode("login"); setError(null) }}
-                  className="font-semibold text-foreground hover:underline underline-offset-4"
-                >
-                  Sign in
-                </button>
-              </>
-            )}
-          </div>
+          {!embedded && (
+            <div className="text-center text-sm text-muted-foreground">
+              {mode === "login" ? (
+                <>
+                  No account?{" "}
+                  <button
+                    type="button"
+                    onClick={() => { setMode("signup"); setError(null) }}
+                    className="font-semibold text-foreground hover:underline underline-offset-4"
+                  >
+                    Sign up free
+                  </button>
+                </>
+              ) : (
+                <>
+                  Already have one?{" "}
+                  <button
+                    type="button"
+                    onClick={() => { setMode("login"); setError(null) }}
+                    className="font-semibold text-foreground hover:underline underline-offset-4"
+                  >
+                    Sign in
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

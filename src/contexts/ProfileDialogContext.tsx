@@ -28,6 +28,8 @@ function isProtectedPath(pathname: string): boolean {
 export type ProfileDialogContextValue = {
   profile: UserProfile | null
   profileLoading: boolean
+  /** True after first profile fetch when the profile wizard is not blocking the app */
+  tutorialCanStart: boolean
   refreshProfile: () => Promise<void>
   /** Opens the same wizard used at onboarding, prefilled from Firestore */
   openPreferencesEditor: () => void
@@ -86,14 +88,17 @@ export function ProfileDialogProvider({ children }: { children: ReactNode }) {
     setDialogOpen(true)
   }, [])
 
+  const tutorialCanStart = initialProfileResolved && !shouldShowProfileOnboarding(profile)
+
   const value = useMemo<ProfileDialogContextValue>(
     () => ({
       profile,
       profileLoading,
+      tutorialCanStart,
       refreshProfile,
       openPreferencesEditor,
     }),
-    [profile, profileLoading, refreshProfile, openPreferencesEditor],
+    [profile, profileLoading, tutorialCanStart, refreshProfile, openPreferencesEditor],
   )
 
   return (

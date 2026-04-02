@@ -56,8 +56,9 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
   }, [messages, sending])
 
   function cleanStreamText(raw: string): string {
-    let clean = raw.replace(/<\/coach>[\s\S]*$/, "").trim()
-    const cutPatterns = [/<user>/i, /\nUser:/i, /\nMe:/i]
+    let clean = raw.replace(/^\s*<\s*coach\s*>/i, "").trim()
+    clean = clean.replace(/<\/coach>[\s\S]*$/, "").trim()
+    const cutPatterns = [/<user>/i, /<\s*coach\s*>/i, /\nUser:/i, /\nMe:/i]
     for (const pat of cutPatterns) {
       const idx = clean.search(pat)
       if (idx !== -1) clean = clean.slice(0, idx).trim()
@@ -77,13 +78,15 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
     if (inputRef.current) inputRef.current.style.height = "auto"
 
     try {
-      const history = updated
-        .map((m) =>
-          m.role === "user"
-            ? `<user>${m.content}</user>`
-            : `<coach>${m.content}</coach>`,
-        )
-        .join("\n") + "\n<coach>"
+      const history =
+        updated
+          .map((m) =>
+            m.role === "user"
+              ? `<user>${m.content}</user>`
+              : `<coach>${m.content}</coach>`,
+          )
+          .join("\n") +
+        "\n\nWrite the coach's next message below as plain text only (do not use <coach> or XML tags)."
 
       const profileBlock = formatUserProfileForPrompt(userProfile)
       const systemPrompt = profileBlock
@@ -298,7 +301,7 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
 
       {/* Plan-ready banner */}
       {planReady && (
-        <div className="shrink-0 w-full max-w-2xl mx-auto px-4 mb-2">
+        <div data-tour-id="goal-build-plan" className="shrink-0 w-full max-w-2xl mx-auto px-4 mb-2">
           <div className="rounded-2xl bg-brand/8 border border-brand/20 px-4 py-3.5 flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-bold leading-snug">Ready to build your plan</p>
@@ -324,7 +327,7 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
       {/* Floating input */}
       <div className="sticky bottom-0 px-4 pb-5 pt-2 bg-linear-to-t from-background via-background/95 to-transparent">
         <div className="w-full max-w-2xl mx-auto">
-          <div className="flex items-end gap-2 rounded-3xl border border-border/70 bg-card/95 backdrop-blur-md shadow-lg shadow-black/5 px-3.5 py-2.5 focus-within:border-brand/40 focus-within:ring-2 focus-within:ring-brand/15 transition-all">
+            <div data-tour-id="goal-chat-input" className="flex items-end gap-2 rounded-3xl border border-border/70 bg-card/95 backdrop-blur-md shadow-lg shadow-black/5 px-3.5 py-2.5 focus-within:border-brand/40 focus-within:ring-2 focus-within:ring-brand/15 transition-all">
             <textarea
               ref={inputRef}
               rows={1}
