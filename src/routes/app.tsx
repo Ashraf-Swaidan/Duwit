@@ -296,7 +296,7 @@ function HomePage() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex flex-col flex-1 min-h-0 pb-[calc(env(safe-area-inset-bottom)+3.5rem)] sm:pb-0">
       {/* Messages area */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6 space-y-4 pb-28">
         <div className="max-w-2xl mx-auto space-y-4">
@@ -484,9 +484,9 @@ function HomePage() {
       )}
 
       {/* Floating input */}
-      <div className="sticky bottom-0 px-4 pb-5 pt-2 bg-linear-to-t from-background via-background/95 to-transparent">
+      <div className="sticky bottom-0 px-4 pb-2.5 sm:pb-5 pt-1.5 bg-linear-to-t from-background via-background/95 to-transparent">
         <div className="max-w-2xl mx-auto">
-          <div className="flex items-end gap-2 rounded-3xl border border-border/70 bg-card/95 backdrop-blur-md shadow-lg shadow-black/5 px-3.5 py-2.5 focus-within:border-brand/40 focus-within:ring-2 focus-within:ring-brand/15 transition-all">
+          <div className="flex items-end gap-2 rounded-3xl border border-border/70 bg-card/95 backdrop-blur-md shadow-lg shadow-black/5 px-3 py-2 focus-within:border-brand/40 focus-within:ring-2 focus-within:ring-brand/15 transition-all">
           <textarea
             ref={inputRef}
             value={input}
@@ -498,12 +498,12 @@ function HomePage() {
             onKeyDown={handleKeyDown}
             placeholder="Message Duwit…"
             rows={1}
-            className="flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground/60 min-h-[42px] max-h-[120px] leading-relaxed"
+            className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground/60 min-h-[36px] max-h-[110px] leading-relaxed"
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || isThinking}
-            className="h-[42px] w-[42px] rounded-2xl bg-brand text-white flex items-center justify-center shrink-0 hover:bg-brand/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="h-9 w-9 rounded-2xl bg-brand text-white flex items-center justify-center shrink-0 hover:bg-brand/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Send className="h-4 w-4" />
           </button>

@@ -39,14 +39,12 @@ export function DesktopTitleBar() {
 
   return (
     <div
-      className="h-10 shrink-0 border-b border-border/60 bg-background/90 backdrop-blur-md flex items-center justify-between pl-3 pr-0"
+      className="sticky top-0 z-70 h-10 shrink-0 border-b border-border/60 bg-background/90 backdrop-blur-md flex items-center justify-between pl-3 pr-0"
       style={{ WebkitAppRegion: "drag" } as CSSProperties}
     >
-      <div className="flex items-center gap-2 select-none">
-        <div className="h-6 w-6 rounded-md bg-brand text-brand-foreground grid place-items-center font-black text-sm">
-          D
-        </div>
-        <span className="text-xs font-semibold tracking-wide text-foreground/90">Duwit</span>
+      <div className="flex items-center gap-2.5 select-none">
+        <img src="/logo.svg" alt="Duwit logo" className="h-8 w-8 object-contain" />
+        <span className="text-sm font-semibold tracking-[0.16em] text-foreground/90">DUWIT</span>
       </div>
 
       <div className="flex items-stretch h-full" style={{ WebkitAppRegion: "no-drag" } as CSSProperties}>

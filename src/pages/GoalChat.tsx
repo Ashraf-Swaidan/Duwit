@@ -202,7 +202,7 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
   // ── Generating screen ──────────────────────────────────────────────────────
   if (generating) {
     return (
-      <div className="min-h-[calc(100svh-3.5rem)] flex flex-col items-center justify-center gap-5 px-4">
+      <div className="h-full min-h-0 flex flex-col items-center justify-center gap-5 px-4">
         <div className="relative">
           <div className="h-20 w-20 rounded-full bg-brand/10 flex items-center justify-center">
             <Sparkles className="h-8 w-8 text-brand" />
@@ -232,7 +232,7 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
 
   // ── Chat screen ────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-[calc(100svh-3.5rem)] w-full">
+    <div className="flex flex-col h-full min-h-0 w-full pb-[calc(env(safe-area-inset-bottom)+4.25rem)] sm:pb-0">
       {/* Message thread */}
       <div
         ref={scrollRef}

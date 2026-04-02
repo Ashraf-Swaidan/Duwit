@@ -16,7 +16,6 @@ import {
   Trash2,
   Copy,
   Check,
-  ListChecks,
   Volume2,
   Phone,
   Loader2,
@@ -167,8 +166,8 @@ export function TaskChat({
   goalState,
   onGoalStateUpdated,
 }: TaskChatProps) {
-  const { selectedModel, selectedSearchModel, selectedImageModel } = useModel()
-  const [focusMode, setFocusMode] = useState(false)
+  const { selectedModel, selectedImageModel } = useModel()
+  const focusMode = false
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [youtubeMeta, setYoutubeMeta] = useState<Record<number, { youtubeSearches: string[]; channels: string[] }>>({})
   /** Per assistant message: web search queries + sources (session only; not persisted). */
@@ -191,7 +190,6 @@ export function TaskChat({
   const prevLengthRef = useRef(0)
   const quizGoalStateRecordedRef = useRef<string | null>(null)
   const { profile: userProfile } = useProfileDialog()
-  const [autoReadAloud, setAutoReadAloud] = useState(false)
   const [voicePanelOpen, setVoicePanelOpen] = useState(false)
   const [voiceInstruction, setVoiceInstruction] = useState("")
   /** One TTS session at a time: loading until first audio, then playing/paused until done or cancel. */
@@ -725,7 +723,7 @@ export function TaskChat({
         systemPrompt,
         temperature: focusMode ? 0.42 : 0.55,
         maxOutputTokens: focusMode ? 650 : 900,
-        modelName: selectedSearchModel ?? selectedModel,
+        modelName: "gemini-2.5-flash",
         enableWebSearch: true,
         onStreamProgress: (evt) => {
           if (evt.type === "phase") {
@@ -812,12 +810,6 @@ export function TaskChat({
       }
       setWebSearchStreamPhase("idle")
       setStreamingGrounding(null)
-      if (autoReadAloud) {
-        const last = final[final.length - 1]
-        if (last?.role === "assistant" && last.content.trim()) {
-          void playAssistantTts(final.length - 1, last.content)
-        }
-      }
       if (uid && chatHydrationReady) {
         void saveTaskChat(uid, goalId, phaseIndex, taskIndex, final, undefined).catch(console.error)
       }
@@ -939,7 +931,7 @@ export function TaskChat({
             <button
               type="button"
               onClick={onToggleReadingFocus}
-              className="shrink-0 h-7 w-7 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="hidden sm:flex shrink-0 h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               title={readingFocusMode ? "Show plan sidebar" : "Focus on chat (hide plan)"}
             >
               {readingFocusMode ? (
@@ -972,31 +964,6 @@ export function TaskChat({
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={() => setFocusMode((v) => !v)}
-            className={`shrink-0 h-7 w-7 flex items-center justify-center rounded-full transition-colors ${
-              focusMode
-                ? "bg-brand/15 text-brand border border-brand/30"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted"
-            }`}
-            title={focusMode ? "Focus mode on — shorter, execution-style replies" : "Focus mode — shorter replies"}
-          >
-            <ListChecks className="h-3.5 w-3.5" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setAutoReadAloud((v) => !v)}
-            className={`shrink-0 h-7 w-7 flex items-center justify-center rounded-full transition-colors ${
-              autoReadAloud
-                ? "bg-brand/15 text-brand border border-brand/30"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted"
-            }`}
-            title={autoReadAloud ? "Auto-read: on — new AI replies are spoken" : "Auto-read: off — tap Listen on a message to hear it"}
-          >
-            <Volume2 className="h-3.5 w-3.5" />
-          </button>
 
           <button
             type="button"

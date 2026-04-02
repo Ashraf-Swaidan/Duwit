@@ -85,9 +85,7 @@ function LoginPage() {
 
       <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-4 py-10 sm:px-6 sm:py-14">
         <div className="w-full max-w-md flex flex-col items-center">
-          <div
-            className="mb-8 flex flex-col items-center text-center space-y-4 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-500"
-          >
+          <div className="mb-8 flex flex-col items-center text-center space-y-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand/12 text-brand ring-1 ring-brand/25 shadow-sm">
               <Sparkles className="h-6 w-6" strokeWidth={1.75} />
             </div>
@@ -106,7 +104,7 @@ function LoginPage() {
             </div>
           </div>
 
-          <div className="w-full flex justify-center motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 motion-safe:delay-100">
+          <div className="w-full flex justify-center">
             <AuthForm
               layout="embedded"
               defaultMode={mode}

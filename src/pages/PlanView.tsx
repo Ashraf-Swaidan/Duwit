@@ -33,7 +33,7 @@ function PlanLoadingSkeleton({ onBack }: { onBack?: () => void }) {
   const pulse = "animate-pulse motion-reduce:animate-none"
   return (
     <div
-      className="h-[calc(100vh-3.5rem)] flex flex-col bg-background overflow-hidden"
+      className="h-full min-h-0 flex flex-col bg-background overflow-hidden"
       aria-busy="true"
       aria-label="Loading goal"
     >
@@ -265,7 +265,7 @@ export function PlanView({ goalId, onBack }: PlanViewProps) {
   const planColumnVisible = Boolean(activeChat && !readingFocusMode)
 
   return (
-    <div className="h-[calc(100vh-3.5rem)] flex flex-col bg-background overflow-hidden">
+    <div className="h-full min-h-0 flex flex-col bg-background overflow-hidden">
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Main Plan Area */}
         <div
