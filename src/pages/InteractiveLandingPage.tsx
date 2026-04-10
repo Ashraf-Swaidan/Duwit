@@ -12,6 +12,7 @@ const DEMO_SCENARIOS = [
 ] as const
 
 const SCENARIO_ROTATE_MS = 28_000
+const WINDOWS_INSTALLER_PATH = "/downloads/Duwit-Setup-latest.exe"
 type ScenarioKey = (typeof DEMO_SCENARIOS)[number]["key"]
 
 type Beat =
@@ -644,6 +645,11 @@ export function InteractiveLandingPage() {
                   <Link to="/login" search={{ redirect: undefined, mode: "login" }}>
                     I already have an account
                   </Link>
+                </Button>
+                <Button size="lg" variant="secondary" className="rounded-full px-6 h-12 font-semibold" asChild>
+                  <a href={WINDOWS_INSTALLER_PATH} download>
+                    Download desktop (Windows)
+                  </a>
                 </Button>
                 <Button
                   type="button"

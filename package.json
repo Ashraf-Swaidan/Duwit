@@ -2,6 +2,8 @@
   "name": "Duwit",
   "private": true,
   "version": "0.0.1",
+  "description": "Duwit web and desktop app",
+  "author": "Duwit",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -11,6 +13,8 @@
     "start:electron": "electron dist-electron/main.js",
     "dist:win": "npm run build && electron-builder --win nsis",
     "dist:portable": "npm run build && electron-builder --win portable",
+    "publish:desktop:local": "node scripts/publish-desktop-installer.mjs",
+    "dist:win:publish-local": "npm run dist:win && npm run publish:desktop:local",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
@@ -75,6 +79,7 @@
       "package.json"
     ],
     "win": {
+      "artifactName": "${productName}-Setup-${version}.${ext}",
       "target": [
         "nsis"
       ],
@@ -84,7 +89,12 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "Duwit",
+      "installerIcon": "public/logo.ico",
+      "uninstallerIcon": "public/logo.ico",
+      "installerHeaderIcon": "public/logo.ico",
+      "include": "build/installer.nsh"
     }
   }
 }

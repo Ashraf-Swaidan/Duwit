@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils"
 /** Swap in your file under `public/landing/` — see `public/landing/README.md`. */
 const HERO_IMAGE = "/landing/hero.webp"
 const STEPS_IMAGE = "/landing/steps.webp"
+const WINDOWS_INSTALLER_PATH = "/downloads/Duwit-Setup-latest.exe"
 
 function LandingImage({
   src,
@@ -115,6 +116,11 @@ export function LandingPage() {
                   <Link to="/login" search={{ redirect: undefined, mode: "login" }}>
                     I already have an account
                   </Link>
+                </Button>
+                <Button size="lg" variant="secondary" className="rounded-full px-6 h-12 font-semibold" asChild>
+                  <a href={WINDOWS_INSTALLER_PATH} download>
+                    Download desktop (Windows)
+                  </a>
                 </Button>
               </div>
               <ul className="flex flex-col gap-2 pt-2 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
