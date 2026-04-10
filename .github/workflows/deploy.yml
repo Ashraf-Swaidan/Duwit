@@ -1,4 +1,4 @@
-name: Deploy Web + Desktop Download
+name: Deploy Web (Firebase Hosting)
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     permissions:
       contents: read
 
@@ -23,9 +23,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Build desktop installer and publish to public assets
-        run: npm run dist:win:publish-local
 
       - name: Build web
         run: npm run build

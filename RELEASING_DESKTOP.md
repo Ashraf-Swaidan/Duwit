@@ -1,8 +1,6 @@
 # Desktop Release Flow (Windows)
 
-This project publishes the desktop installer to a stable website path:
-
-- `/downloads/Duwit-Setup-latest.exe`
+Firebase Hosting on Spark cannot serve `.exe` files, so desktop installers are distributed from GitHub Releases.
 
 ## One-time prerequisites
 
@@ -12,13 +10,17 @@ This project publishes the desktop installer to a stable website path:
 ## Release steps
 
 1. Bump app version in `package.json`.
-2. Build installer and copy it to hosted downloads:
+2. Build installer:
 
 ```bash
-npm run dist:win:publish-local
+npm run dist:win
 ```
 
-3. Deploy web + download artifact to Firebase Hosting:
+3. Create or open a GitHub release (usually tag `vX.Y.Z`) and upload:
+
+- `release/Duwit-Setup-<version>.exe`
+
+4. Deploy web app to Firebase Hosting:
 
 ```bash
 npm run build
@@ -27,8 +29,8 @@ firebase deploy --only hosting
 
 ## Result
 
-Users can always download the latest Windows installer from:
+Users can download the latest desktop installer from:
 
-- `/downloads/Duwit-Setup-latest.exe`
+- `https://github.com/Ashraf-Swaidan/Duwit/releases/latest`
 
-You can link this directly in landing pages and marketing pages.
+Landing pages can link directly to the latest releases page.

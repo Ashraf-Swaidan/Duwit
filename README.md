@@ -92,21 +92,17 @@ Build Windows installer:
 npm run dist:win
 ```
 
-Build installer and publish to website assets in one step:
+Build Windows installer:
 
 ```bash
-npm run dist:win:publish-local
+npm run dist:win
 ```
 
-That command copies the newest setup exe into:
+Firebase Hosting (Spark) cannot host `.exe` files, so publish installers via GitHub Releases:
 
-- `public/downloads/Duwit-Setup-latest.exe`
+- [Latest desktop release](https://github.com/Ashraf-Swaidan/Duwit/releases/latest)
 
-So users can always download from:
-
-- `/downloads/Duwit-Setup-latest.exe`
-
-For release details, see `RELEASING_DESKTOP.md`.
+For the full release process, see `RELEASING_DESKTOP.md`.
 
 ## Firebase Hosting deploy
 
@@ -117,7 +113,7 @@ npm run build
 firebase deploy --only hosting
 ```
 
-If GitHub Actions is configured, pushes to `master` can auto-deploy web + desktop download artifact.
+If GitHub Actions is configured, pushes to `master` can auto-deploy the web app.
 
 ## Quality checks
 

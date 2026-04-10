@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils"
 /** Swap in your file under `public/landing/` — see `public/landing/README.md`. */
 const HERO_IMAGE = "/landing/hero.webp"
 const STEPS_IMAGE = "/landing/steps.webp"
-const WINDOWS_INSTALLER_PATH = "/downloads/Duwit-Setup-latest.exe"
+const WINDOWS_INSTALLER_PATH = "https://github.com/Ashraf-Swaidan/Duwit/releases/latest"
 
 function LandingImage({
   src,
@@ -118,7 +118,7 @@ export function LandingPage() {
                   </Link>
                 </Button>
                 <Button size="lg" variant="secondary" className="rounded-full px-6 h-12 font-semibold" asChild>
-                  <a href={WINDOWS_INSTALLER_PATH} download>
+                  <a href={WINDOWS_INSTALLER_PATH} target="_blank" rel="noreferrer">
                     Download desktop (Windows)
                   </a>
                 </Button>

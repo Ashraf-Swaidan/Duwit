@@ -13,8 +13,6 @@
     "start:electron": "electron dist-electron/main.js",
     "dist:win": "npm run build && electron-builder --win nsis --publish never",
     "dist:portable": "npm run build && electron-builder --win portable --publish never",
-    "publish:desktop:local": "node scripts/publish-desktop-installer.mjs",
-    "dist:win:publish-local": "npm run dist:win && npm run publish:desktop:local",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",

@@ -12,7 +12,7 @@ const DEMO_SCENARIOS = [
 ] as const
 
 const SCENARIO_ROTATE_MS = 28_000
-const WINDOWS_INSTALLER_PATH = "/downloads/Duwit-Setup-latest.exe"
+const WINDOWS_INSTALLER_PATH = "https://github.com/Ashraf-Swaidan/Duwit/releases/latest"
 type ScenarioKey = (typeof DEMO_SCENARIOS)[number]["key"]
 
 type Beat =
@@ -647,7 +647,7 @@ export function InteractiveLandingPage() {
                   </Link>
                 </Button>
                 <Button size="lg" variant="secondary" className="rounded-full px-6 h-12 font-semibold" asChild>
-                  <a href={WINDOWS_INSTALLER_PATH} download>
+                  <a href={WINDOWS_INSTALLER_PATH} target="_blank" rel="noreferrer">
                     Download desktop (Windows)
                   </a>
                 </Button>
