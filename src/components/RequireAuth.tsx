@@ -12,7 +12,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
     if (loading || user) return
     navigate({
       to: "/login",
-      search: { redirect: pathname },
+      search: { redirect: pathname, mode: "login" },
       replace: true,
     })
   }, [loading, user, navigate, pathname])

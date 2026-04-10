@@ -71,12 +71,12 @@ export function LandingPage() {
           <span className="font-black text-lg tracking-tight">Duwit</span>
           <nav className="flex items-center gap-2 sm:gap-3">
             <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground" asChild>
-              <Link to="/login" search={{ mode: "login" }}>
+              <Link to="/login" search={{ redirect: undefined, mode: "login" }}>
                 Sign in
               </Link>
             </Button>
             <Button size="sm" className="rounded-full px-4 font-semibold shadow-sm" asChild>
-              <Link to="/login" search={{ mode: "signup" }}>
+              <Link to="/login" search={{ redirect: undefined, mode: "signup" }}>
                 Get started
               </Link>
             </Button>
@@ -106,13 +106,13 @@ export function LandingPage() {
               </p>
               <div className="flex flex-wrap items-center gap-3">
                 <Button size="lg" className="rounded-full px-8 font-semibold gap-2 h-12" asChild>
-                  <Link to="/login" search={{ mode: "signup" }}>
+                  <Link to="/login" search={{ redirect: undefined, mode: "signup" }}>
                     Create free account
                     <ArrowRight className="h-4 w-4" />
                   </Link>
                 </Button>
                 <Button size="lg" variant="outline" className="rounded-full px-6 h-12 font-semibold" asChild>
-                  <Link to="/login" search={{ mode: "login" }}>
+                  <Link to="/login" search={{ redirect: undefined, mode: "login" }}>
                     I already have an account
                   </Link>
                 </Button>
@@ -285,12 +285,12 @@ export function LandingPage() {
             </p>
             <div className="flex flex-wrap justify-center gap-3">
               <Button size="lg" className="rounded-full px-8 font-semibold h-12" asChild>
-                <Link to="/login" search={{ mode: "signup" }}>
+                <Link to="/login" search={{ redirect: undefined, mode: "signup" }}>
                   Get started free
                 </Link>
               </Button>
               <Button size="lg" variant="outline" className="rounded-full px-6 h-12 font-semibold" asChild>
-                <Link to="/login" search={{ mode: "login" }}>
+                <Link to="/login" search={{ redirect: undefined, mode: "login" }}>
                   Sign in
                 </Link>
               </Button>
@@ -302,10 +302,10 @@ export function LandingPage() {
       <footer className="border-t border-border/60 py-8 text-center text-xs text-muted-foreground">
         <p>© {new Date().getFullYear()} Duwit</p>
         <div className="mt-2 flex justify-center gap-4">
-          <Link to="/login" search={{ mode: "login" }} className="font-medium hover:text-foreground">
+          <Link to="/login" search={{ redirect: undefined, mode: "login" }} className="font-medium hover:text-foreground">
             Sign in
           </Link>
-          <Link to="/login" search={{ mode: "signup" }} className="font-medium hover:text-foreground">
+          <Link to="/login" search={{ redirect: undefined, mode: "signup" }} className="font-medium hover:text-foreground">
             Create account
           </Link>
         </div>

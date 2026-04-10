@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react"
 import { Minus, Square, SquareDashed, X } from "lucide-react"
 
+const logoSrc = `${import.meta.env.BASE_URL}logo.svg`
+
 function isElectronEnvironment() {
   return typeof window !== "undefined" && typeof window.electron !== "undefined"
 }
@@ -43,7 +45,7 @@ export function DesktopTitleBar() {
       style={{ WebkitAppRegion: "drag" } as CSSProperties}
     >
       <div className="flex items-center gap-2.5 select-none">
-        <img src="/logo.svg" alt="Duwit logo" className="h-8 w-8 object-contain" />
+        <img src={logoSrc} alt="Duwit logo" className="h-8 w-8 object-contain" />
         <span className="text-sm font-semibold tracking-[0.16em] text-foreground/90">DUWIT</span>
       </div>
 

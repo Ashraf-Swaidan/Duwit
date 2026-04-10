@@ -3,6 +3,8 @@ import { motion } from "motion/react"
 import { Layers, ListChecks, Map, MessageCircle, Sparkles, Target } from "lucide-react"
 import { cn } from "@/lib/utils"
 
+const logoSrc = `${import.meta.env.BASE_URL}logo.svg`
+
 /**
  * Light Duwit-themed ornament: goals, home chat, plan phases, tasks, path, coach sparkle.
  * Sits above gradients, below hero copy. Pointer-events none.
@@ -20,7 +22,7 @@ export function LoginArtMotifs() {
 
   const drift = reduceMotion
     ? undefined
-    : { y: [0, -7, 0] as const, rotate: [0, 1.5, 0] as const }
+    : { y: [0, -7, 0], rotate: [0, 1.5, 0] }
 
   const driftTransition = (delay: number, duration: number) => ({
     duration,
@@ -85,7 +87,7 @@ export function LoginArtMotifs() {
 
       {/* Faint mark — same asset as app chrome */}
       <img
-        src="/logo.svg"
+        src={logoSrc}
         alt=""
         className="absolute bottom-5 right-5 h-18 w-18 opacity-[0.06] saturate-0 sm:bottom-8 sm:right-8 sm:h-28 sm:w-28 dark:opacity-[0.09]"
       />

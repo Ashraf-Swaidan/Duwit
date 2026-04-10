@@ -1,5 +1,16 @@
 import { createContext, useContext, useState, type ReactNode } from "react"
 
+type ModelDefinition = {
+  id: string
+  name: string
+  description: string
+}
+
+type ModelGroup = {
+  label: string
+  models: readonly ModelDefinition[]
+}
+
 export const MODEL_GROUPS = [
   {
     label: "Gemini",
@@ -26,15 +37,18 @@ export const MODEL_GROUPS = [
       },
     ],
   },
-] as const
+] as const satisfies readonly ModelGroup[]
 
-export const AVAILABLE_MODELS = MODEL_GROUPS.flatMap((g) => g.models)
+export const AVAILABLE_MODELS = MODEL_GROUPS.reduce<ModelDefinition[]>(
+  (acc, group) => [...acc, ...group.models],
+  [],
+)
 export const IMAGE_MODELS = [
   { id: "pollinations:flux", name: "Pollinations Flux", description: "General purpose image model" },
   { id: "pollinations:zimage", name: "Z-Image Turbo", description: "Low-cost fast generation" },
 ] as const
 
-export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"]
+export type ModelId = (typeof MODEL_GROUPS)[number]["models"][number]["id"]
 export type ImageModelId = (typeof IMAGE_MODELS)[number]["id"]
 
 /** Old ids → current id (persisted in localStorage). */

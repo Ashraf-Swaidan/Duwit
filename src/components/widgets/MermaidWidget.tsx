@@ -5,6 +5,13 @@ interface MermaidData {
   code: string
 }
 
+function toMermaidData(data: Record<string, unknown>): MermaidData {
+  if (typeof data.code === "string") {
+    return { code: data.code }
+  }
+  return { code: "" }
+}
+
 export function MermaidWidget({
   data,
   title,
@@ -12,7 +19,7 @@ export function MermaidWidget({
   data: Record<string, unknown>
   title?: string
 }) {
-  const mermaidData = data as MermaidData
+  const mermaidData = toMermaidData(data)
   const ref = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<string | null>(null)
 

@@ -294,12 +294,15 @@ function HomePage() {
   const pendingNewGoalFlow =
     pendingNavGoalId === NAVIGATE_NEW_GOAL && pendingGoal === null
 
+  const homeMarkdownClass =
+    "space-y-4 [&>p]:text-[1.0625rem] sm:[&>p]:text-[1.125rem] [&>p]:leading-[1.7] [&>ul]:space-y-2 [&>ol]:space-y-2 [&>ul]:ml-6 [&>ol]:ml-6 [&>h1]:text-xl [&>h1]:mt-6 [&>h1]:mb-2 [&>h2]:text-lg [&>h2]:mt-5 [&>h2]:mb-2 [&>h3]:text-base [&>h3]:font-semibold [&>blockquote]:pl-4 [&_table]:text-[0.95rem] sm:[&_table]:text-base [&_pre]:text-sm"
+
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col flex-1 min-h-0 pb-[calc(env(safe-area-inset-bottom)+3.5rem)] sm:pb-0">
-      {/* Messages area */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-6 space-y-4 pb-28">
-        <div className="max-w-2xl mx-auto space-y-4">
+      {/* Messages area — roomy layout, larger type for a calmer read */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-8 py-8 sm:py-10 space-y-6 sm:space-y-8 pb-32">
+        <div className="max-w-3xl mx-auto space-y-6 sm:space-y-8">
           {messages.map((msg, i) => {
             const isAssistantStreamingShell =
               msg.role === 'assistant' &&
@@ -313,29 +316,29 @@ function HomePage() {
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1 duration-200`}
               >
                 {msg.role === 'assistant' && (
-                  <div className="h-8 w-8 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mr-3 mt-0.5">
-                    <Sparkles className="h-3.5 w-3.5 text-brand" />
+                  <div className="h-10 w-10 rounded-full bg-brand/10 border border-brand/20 flex items-center justify-center shrink-0 mr-3.5 mt-1">
+                    <Sparkles className="h-4 w-4 text-brand" />
                   </div>
                 )}
                 {msg.role === 'assistant' ? (
                   <div
-                    className="flex-1 min-w-0 text-sm leading-7 text-foreground py-0.5"
+                    className="flex-1 min-w-0 text-[1.0625rem] sm:text-[1.125rem] leading-[1.7] text-foreground py-1"
                     style={{ wordBreak: 'break-word' }}
                   >
                     {isAssistantStreamingShell ? (
-                      <div className="flex items-center gap-1.5 py-2" aria-hidden>
-                        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.3s]" />
-                        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.15s]" />
-                        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 animate-bounce" />
+                      <div className="flex items-center gap-2 py-3" aria-hidden>
+                        <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.3s]" />
+                        <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:-0.15s]" />
+                        <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce" />
                       </div>
                     ) : (
-                      <Markdown content={msg.content} />
+                      <Markdown content={msg.content} className={homeMarkdownClass} />
                     )}
                   </div>
                 ) : (
                   /* User: large radius reads as a pill for long text but won't collapse to a circle on narrow widths */
                   <div
-                    className="max-w-[min(82%,28rem)] rounded-[1.25rem] px-4 py-2.5 text-sm leading-relaxed bg-brand text-white text-left"
+                    className="max-w-[min(88%,32rem)] rounded-[1.35rem] px-5 py-3.5 text-[1.0625rem] sm:text-[1.125rem] leading-[1.65] bg-brand-muted text-foreground text-left border border-brand/25 dark:border-brand/35 shadow-sm shadow-black/6 dark:shadow-black/25"
                     style={{ wordBreak: 'break-word' }}
                   >
                     <span className="whitespace-pre-wrap block">{msg.content}</span>
@@ -351,13 +354,13 @@ function HomePage() {
 
       {/* Goal Suggestion Chips */}
       {suggestions.length > 0 && messages.length <= 1 && (
-        <div className="px-4 pb-2">
-          <div className="max-w-2xl mx-auto flex flex-wrap gap-2">
+        <div className="px-5 sm:px-8 pb-3">
+          <div className="max-w-3xl mx-auto flex flex-wrap gap-2.5">
             {suggestions.map((s) => (
               <button
                 key={s.goalId}
                 onClick={() => navigate({ to: '/plan/$goalId', params: { goalId: s.goalId } })}
-                className="text-xs font-semibold px-3.5 py-2 rounded-full border border-border/80 bg-card hover:bg-muted hover:border-brand/40 transition-all duration-150 flex items-center gap-1.5 max-w-[260px] truncate"
+                className="text-sm font-semibold px-4 py-2.5 rounded-full border border-border/80 bg-card hover:bg-muted hover:border-brand/40 transition-all duration-150 flex items-center gap-2 max-w-[280px] truncate"
               >
                 <span className="truncate">{s.label}</span>
                 <span className="text-muted-foreground shrink-0">{s.progress}%</span>
@@ -369,34 +372,34 @@ function HomePage() {
 
       {/* Pending navigation confirmation */}
       {pendingNewGoalFlow && (
-        <div className="px-4 pb-3">
-          <div className="max-w-2xl mx-auto">
-            <div className="rounded-2xl border border-border/70 bg-card/95 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 animate-in fade-in slide-in-from-bottom-1 duration-200">
+        <div className="px-5 sm:px-8 pb-4">
+          <div className="max-w-3xl mx-auto">
+            <div className="rounded-2xl border border-border/70 bg-card/95 px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 animate-in fade-in slide-in-from-bottom-1 duration-200">
               <div>
                 {isNavigatingGoal ? (
                   <>
-                    <p className="text-sm font-semibold">Starting new goal…</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
+                    <p className="text-base font-semibold leading-snug">Starting new goal…</p>
+                    <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
                       Opening the planner so you can shape your plan.
                     </p>
                   </>
                 ) : (
                   <>
-                    <p className="text-sm font-semibold">Create a new goal?</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
+                    <p className="text-base font-semibold leading-snug">Create a new goal?</p>
+                    <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
                       I can take you to the guided flow to define what you want and build a plan.
                     </p>
                   </>
                 )}
               </div>
-              <div className="flex gap-2 justify-end">
+              <div className="flex gap-2.5 justify-end shrink-0">
                 <button
                   type="button"
                   onClick={() => {
                     if (isNavigatingGoal) return
                     setPendingNavGoalId(null)
                   }}
-                  className="h-8 px-3 rounded-xl text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                  className="h-10 px-4 rounded-xl text-sm font-semibold text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
                   disabled={isNavigatingGoal}
                 >
                   Not now
@@ -412,7 +415,7 @@ function HomePage() {
                       navigate({ to: '/new-goal' })
                     }, 800)
                   }}
-                  className="h-8 px-3 rounded-xl text-xs font-semibold bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-60"
+                  className="h-10 px-4 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-60"
                   disabled={isNavigatingGoal}
                 >
                   {isNavigatingGoal ? 'Opening…' : 'Start new goal'}
@@ -424,38 +427,38 @@ function HomePage() {
       )}
 
       {pendingGoal && (
-        <div className="px-4 pb-3">
-          <div className="max-w-2xl mx-auto">
-            <div className="rounded-2xl border border-border/70 bg-card/95 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 animate-in fade-in slide-in-from-bottom-1 duration-200">
+        <div className="px-5 sm:px-8 pb-4">
+          <div className="max-w-3xl mx-auto">
+            <div className="rounded-2xl border border-border/70 bg-card/95 px-5 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 animate-in fade-in slide-in-from-bottom-1 duration-200">
               <div>
                 {isNavigatingGoal ? (
                   <>
-                    <p className="text-sm font-semibold">
+                    <p className="text-base font-semibold leading-snug">
                       Opening “{pendingGoal.title}”…
                     </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
+                    <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
                       Loading your plan. This will just take a moment.
                     </p>
                   </>
                 ) : (
                   <>
-                    <p className="text-sm font-semibold">
+                    <p className="text-base font-semibold leading-snug">
                       Continue with “{pendingGoal.title}”?
                     </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
+                    <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
                       I can open its plan so you can jump back into it.
                     </p>
                   </>
                 )}
               </div>
-              <div className="flex gap-2 justify-end">
+              <div className="flex gap-2.5 justify-end shrink-0">
                 <button
                   type="button"
                   onClick={() => {
                     if (isNavigatingGoal) return
                     setPendingNavGoalId(null)
                   }}
-                  className="h-8 px-3 rounded-xl text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                  className="h-10 px-4 rounded-xl text-sm font-semibold text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
                   disabled={isNavigatingGoal}
                 >
                   Not now
@@ -472,7 +475,7 @@ function HomePage() {
                       navigate({ to: '/plan/$goalId', params: { goalId } })
                     }, 1500)
                   }}
-                  className="h-8 px-3 rounded-xl text-xs font-semibold bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-60"
+                  className="h-10 px-4 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-60"
                   disabled={isNavigatingGoal}
                 >
                   {isNavigatingGoal ? 'Opening…' : 'Open plan'}
@@ -484,28 +487,28 @@ function HomePage() {
       )}
 
       {/* Floating input */}
-      <div className="sticky bottom-0 px-4 pb-2.5 sm:pb-5 pt-1.5 bg-linear-to-t from-background via-background/95 to-transparent">
-        <div className="max-w-2xl mx-auto">
-          <div data-tour-id="home-chat-input" className="flex items-end gap-2 rounded-3xl border border-border/70 bg-card/95 backdrop-blur-md shadow-lg shadow-black/5 px-3 py-2 focus-within:border-brand/40 focus-within:ring-2 focus-within:ring-brand/15 transition-all">
+      <div className="sticky bottom-0 px-5 sm:px-8 pb-3 sm:pb-6 pt-2 bg-linear-to-t from-background via-background/95 to-transparent">
+        <div className="max-w-3xl mx-auto">
+          <div data-tour-id="home-chat-input" className="flex items-end gap-3 rounded-[1.35rem] border border-border/70 bg-card/95 backdrop-blur-md shadow-lg shadow-black/5 px-4 py-3 focus-within:border-brand/40 focus-within:ring-2 focus-within:ring-brand/15 transition-all">
           <textarea
             ref={inputRef}
             value={input}
             onChange={(e) => {
               setInput(e.target.value)
               e.target.style.height = 'auto'
-              e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`
+              e.target.style.height = `${Math.min(e.target.scrollHeight, 140)}px`
             }}
             onKeyDown={handleKeyDown}
             placeholder="Message Duwit…"
             rows={1}
-            className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground/60 min-h-[36px] max-h-[110px] leading-relaxed"
+            className="flex-1 resize-none bg-transparent px-1 py-1 text-base outline-none placeholder:text-muted-foreground/55 min-h-[44px] max-h-[140px] leading-[1.55]"
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || isThinking}
-            className="h-9 w-9 rounded-2xl bg-brand text-white flex items-center justify-center shrink-0 hover:bg-brand/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="h-11 w-11 rounded-2xl bg-brand text-white flex items-center justify-center shrink-0 hover:bg-brand/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <Send className="h-4 w-4" />
+            <Send className="h-5 w-5" />
           </button>
           </div>
         </div>

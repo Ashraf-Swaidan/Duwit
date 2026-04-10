@@ -92,18 +92,8 @@ function normalizeRms(rms: number) {
   return Math.pow(normalized, 0.5)
 }
 
-function rmsFromPcm16(pcm16: Int16Array): number {
-  if (pcm16.length === 0) return 0
-  let sum = 0
-  for (let i = 0; i < pcm16.length; i++) {
-    const sample = pcm16[i] / 32768
-    sum += sample * sample
-  }
-  return Math.sqrt(sum / pcm16.length)
-}
-
 function rmsFromTimeDomain(analyser: AnalyserNode, buf: Float32Array): number {
-  analyser.getFloatTimeDomainData(buf)
+  analyser.getFloatTimeDomainData(buf as unknown as Float32Array<ArrayBuffer>)
   let sum = 0
   for (let i = 0; i < buf.length; i++) {
     const sample = buf[i]

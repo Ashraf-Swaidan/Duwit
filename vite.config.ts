@@ -6,6 +6,8 @@ import { defineConfig } from "vite"
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Use relative asset paths so Electron file:// production loads work.
+  base: "./",
   plugins: [TanStackRouterVite(), react(), tailwindcss()],
   resolve: {
     alias: {

@@ -35,6 +35,8 @@ import { DesktopTitleBar } from "@/components/DesktopTitleBar"
 import type { VoiceLiveModelChoice } from "@/config/geminiMedia"
 import { cn } from "@/lib/utils"
 
+const logoSrc = `${import.meta.env.BASE_URL}logo.svg`
+
 export const Route = createRootRoute({
   component: RootComponent,
 })
@@ -473,7 +475,7 @@ function FocusedOnboarding({
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
-            <img src="/logo.svg" alt="Duwit" className="h-5 w-5 shrink-0" />
+            <img src={logoSrc} alt="Duwit" className="h-5 w-5 shrink-0" />
             <p className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wide truncate">
               Quick tour ({stepIndex + 1}/{steps.length})
             </p>
@@ -924,7 +926,7 @@ function RootLayout() {
           {/* Desktop side rail */}
           <aside className="hidden sm:flex fixed right-5 top-1/2 -translate-y-1/2 z-40 flex-col gap-1 rounded-2xl border border-white/10 bg-zinc-900/90 text-zinc-100 backdrop-blur-md p-1.5 shadow-xl">
             <div className="h-10 w-10 flex items-center justify-center mb-1 rounded-xl bg-white/12 ring-1 ring-white/20 shadow-sm">
-              <img src="/logo.svg" alt="Duwit logo" className="h-9 w-9 object-contain brightness-110" />
+              <img src={logoSrc} alt="Duwit logo" className="h-9 w-9 object-contain brightness-110" />
             </div>
             {tabs.map(({ to, icon: Icon, label }) => {
               const isActive = currentPath === to
@@ -1094,7 +1096,7 @@ function RootLayout() {
                 }`}
               >
                 <div className="h-10 w-10 flex items-center justify-center mb-1 rounded-xl bg-white/12 ring-1 ring-white/20 shadow-sm">
-                  <img src="/logo.svg" alt="Duwit logo" className="h-9 w-9 object-contain brightness-110" />
+                  <img src={logoSrc} alt="Duwit logo" className="h-9 w-9 object-contain brightness-110" />
                 </div>
                 {tabs.map(({ to, icon: Icon, label }) => {
                   const isActive = currentPath === to
