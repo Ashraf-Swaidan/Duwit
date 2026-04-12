@@ -1,5 +1,5 @@
 import { createRootRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
+import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { signOut } from "firebase/auth"
 import { useQuery } from "@tanstack/react-query"
@@ -34,8 +34,7 @@ import { ProfileDialogProvider, useProfileDialog } from "@/contexts/ProfileDialo
 import { DesktopTitleBar } from "@/components/DesktopTitleBar"
 import type { VoiceLiveModelChoice } from "@/config/geminiMedia"
 import { cn } from "@/lib/utils"
-
-const logoSrc = `${import.meta.env.BASE_URL}logo.svg`
+import { getLogoUrl } from "@/lib/logoUrl"
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -475,7 +474,7 @@ function FocusedOnboarding({
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
-            <img src={logoSrc} alt="Duwit" className="h-5 w-5 shrink-0" />
+            <img src={getLogoUrl()} alt="Duwit" className="h-5 w-5 shrink-0" />
             <p className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wide truncate">
               Quick tour ({stepIndex + 1}/{steps.length})
             </p>
@@ -527,17 +526,13 @@ function FocusedOnboarding({
   )
 }
 
-function SettingsDrawerPanel({
-  settingsOpen,
+const SettingsDrawerBody = memo(function SettingsDrawerBody({
   setSettingsOpen,
-  isElectron,
+  openPreferencesEditor,
 }: {
-  settingsOpen: boolean
   setSettingsOpen: (v: boolean) => void
-  isElectron: boolean
+  openPreferencesEditor: () => void
 }) {
-  const { user } = useAuth()
-  const { openPreferencesEditor } = useProfileDialog()
   const {
     selectedModel,
     setSelectedModel,
@@ -545,41 +540,10 @@ function SettingsDrawerPanel({
     setSelectedImageModel,
   } = useModel()
   const { voiceLiveModel, setVoiceLiveModel } = useVoiceLiveModel()
-  const navigate = useNavigate()
 
   const [aiOpen, setAiOpen] = useState(false)
   const [prefsOpen, setPrefsOpen] = useState(false)
-  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
-  const profileMenuRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    function close(e: MouseEvent) {
-      if (!profileMenuRef.current?.contains(e.target as Node)) setProfileMenuOpen(false)
-    }
-    if (profileMenuOpen) document.addEventListener("mousedown", close)
-    return () => document.removeEventListener("mousedown", close)
-  }, [profileMenuOpen])
-
-  useEffect(() => {
-    if (!settingsOpen) return
-    setAiOpen(false)
-    setPrefsOpen(false)
-    setProfileMenuOpen(false)
-  }, [settingsOpen])
-
-  async function handleLogout() {
-    try {
-      await signOut(auth)
-      setSettingsOpen(false)
-      navigate({ to: "/", replace: true })
-    } catch (e) {
-      console.error("Logout failed:", e)
-    }
-  }
-
-  const displayName = user?.displayName?.trim() || user?.email?.split("@")[0] || "User"
-  const email = user?.email ?? ""
-  const initial = (displayName[0] || email[0] || "?").toUpperCase()
   const textModelOptions = AVAILABLE_MODELS as ReadonlyArray<{
     id: ModelId
     name: string
@@ -587,29 +551,8 @@ function SettingsDrawerPanel({
   }>
 
   return (
-    <motion.div
-      initial={false}
-      animate={{
-        x: settingsOpen ? 0 : "100%",
-        opacity: settingsOpen ? 1 : 0.985,
-      }}
-      transition={{ type: "spring", stiffness: 320, damping: 30, mass: 0.85 }}
-      className={`fixed right-0 bottom-0 z-50 w-full sm:w-104 max-w-full bg-card border-l border-border/80 flex flex-col shadow-2xl ${
-        isElectron ? "top-10" : "top-0"
-      }`}
-    >
-      <div className="flex items-center justify-between px-5 sm:px-6 h-14 border-b border-border/70 shrink-0">
-        <span className="font-bold text-base">Settings</span>
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(false)}
-          className="h-8 w-8 flex items-center justify-center rounded-full hover:bg-muted/70 transition-colors"
-        >
-          <X className="h-4 w-4 text-muted-foreground" />
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-5 sm:py-6 space-y-4 min-h-0">
+    <>
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 sm:py-6 space-y-4 [contain:content]">
         <div className="rounded-2xl border border-border/70 overflow-hidden bg-background">
           <button
             type="button"
@@ -622,17 +565,8 @@ function SettingsDrawerPanel({
             </span>
             <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", aiOpen && "rotate-180")} />
           </button>
-          <AnimatePresence initial={false}>
-            {aiOpen && (
-              <motion.div
-                key="ai-settings-content"
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.24, ease: "easeInOut" }}
-                className="overflow-hidden border-t border-border/60"
-              >
-                <div className="px-4 pb-4 pt-3 space-y-4">
+          {aiOpen ? (
+            <div className="border-t border-border/60 px-4 pb-4 pt-3 space-y-4">
               <div className="space-y-1.5">
                 <label htmlFor="text-model" className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                   Text model
@@ -712,13 +646,10 @@ function SettingsDrawerPanel({
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+            </div>
+          ) : null}
         </div>
 
-        {/* Preferences */}
         <div className="rounded-2xl border border-border/70 overflow-hidden bg-background">
           <button
             type="button"
@@ -733,84 +664,152 @@ function SettingsDrawerPanel({
               className={cn("h-4 w-4 text-muted-foreground transition-transform", prefsOpen && "rotate-180")}
             />
           </button>
-          <AnimatePresence initial={false}>
-            {prefsOpen && (
-              <motion.div
-                key="prefs-settings-content"
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.22, ease: "easeInOut" }}
-                className="overflow-hidden border-t border-border/60"
+          {prefsOpen ? (
+            <div className="border-t border-border/60 px-4 pb-4 pt-3 space-y-3">
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Learning style, pace, tone, and accessibility — used across every chat to personalize coaching.
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full rounded-xl gap-2"
+                onClick={() => {
+                  openPreferencesEditor()
+                  setSettingsOpen(false)
+                }}
               >
-                <div className="px-4 pb-4 pt-3 space-y-3">
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    Learning style, pace, tone, and accessibility — used across every chat to personalize coaching.
-                  </p>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full rounded-xl gap-2"
-                    onClick={() => {
-                      openPreferencesEditor()
-                      setSettingsOpen(false)
-                    }}
-                  >
-                    <Pencil className="h-4 w-4" />
-                    Edit preferences
-                  </Button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                <Pencil className="h-4 w-4" />
+                Edit preferences
+              </Button>
+            </div>
+          ) : null}
         </div>
       </div>
 
-      {/* Profile card */}
-      <div className="shrink-0 border-t border-border/70 p-4 bg-muted/15">
-        <div className="flex items-center gap-3">
-          <div className="h-11 w-11 rounded-full bg-brand/15 text-brand flex items-center justify-center text-sm font-bold shrink-0 ring-2 ring-background">
-            {initial}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold truncate">{displayName}</p>
-            <p className="text-xs text-muted-foreground truncate">{email}</p>
-          </div>
-          <div className="relative shrink-0" ref={profileMenuRef}>
-            <button
-              type="button"
-              onClick={() => setProfileMenuOpen((o) => !o)}
-              className="h-9 w-9 flex items-center justify-center rounded-full hover:bg-muted transition-colors"
-              aria-label="Account menu"
-            >
-              <MoreVertical className="h-4 w-4 text-muted-foreground" />
-            </button>
-            {profileMenuOpen && (
-              <div className="absolute bottom-full right-0 mb-1 w-48 rounded-xl border border-border bg-popover shadow-lg py-1 z-60">
-                <button
-                  type="button"
-                  disabled
-                  className="w-full px-3 py-2 text-left text-sm text-muted-foreground cursor-not-allowed opacity-60 flex items-center gap-2"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                  Edit profile
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProfileMenuOpen(false)
-                    void handleLogout()
-                  }}
-                  className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  Log out
-                </button>
-              </div>
-            )}
-          </div>
+      <SettingsDrawerProfileFooter setSettingsOpen={setSettingsOpen} />
+    </>
+  )
+})
+
+function SettingsDrawerProfileFooter({
+  setSettingsOpen,
+}: {
+  setSettingsOpen: (v: boolean) => void
+}) {
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const profileMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function close(e: MouseEvent) {
+      if (!profileMenuRef.current?.contains(e.target as Node)) setProfileMenuOpen(false)
+    }
+    if (profileMenuOpen) document.addEventListener("mousedown", close)
+    return () => document.removeEventListener("mousedown", close)
+  }, [profileMenuOpen])
+
+  async function handleLogout() {
+    try {
+      await signOut(auth)
+      setSettingsOpen(false)
+      navigate({ to: "/", replace: true })
+    } catch (e) {
+      console.error("Logout failed:", e)
+    }
+  }
+
+  const displayName = user?.displayName?.trim() || user?.email?.split("@")[0] || "User"
+  const email = user?.email ?? ""
+  const initial = (displayName[0] || email[0] || "?").toUpperCase()
+
+  return (
+    <div className="shrink-0 border-t border-border/70 p-4 bg-muted/15">
+      <div className="flex items-center gap-3">
+        <div className="h-11 w-11 rounded-full bg-brand/15 text-brand flex items-center justify-center text-sm font-bold shrink-0 ring-2 ring-background">
+          {initial}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold truncate">{displayName}</p>
+          <p className="text-xs text-muted-foreground truncate">{email}</p>
+        </div>
+        <div className="relative shrink-0" ref={profileMenuRef}>
+          <button
+            type="button"
+            onClick={() => setProfileMenuOpen((o) => !o)}
+            className="h-9 w-9 flex items-center justify-center rounded-full hover:bg-muted transition-colors"
+            aria-label="Account menu"
+          >
+            <MoreVertical className="h-4 w-4 text-muted-foreground" />
+          </button>
+          {profileMenuOpen ? (
+            <div className="absolute bottom-full right-0 mb-1 w-48 rounded-xl border border-border bg-popover shadow-lg py-1 z-60">
+              <button
+                type="button"
+                disabled
+                className="w-full px-3 py-2 text-left text-sm text-muted-foreground cursor-not-allowed opacity-60 flex items-center gap-2"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Edit profile
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setProfileMenuOpen(false)
+                  void handleLogout()
+                }}
+                className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Log out
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
+    </div>
+  )
+}
+
+function SettingsDrawerPanel({
+  settingsOpen,
+  setSettingsOpen,
+  isElectron,
+}: {
+  settingsOpen: boolean
+  setSettingsOpen: (v: boolean) => void
+  isElectron: boolean
+}) {
+  const { openPreferencesEditor } = useProfileDialog()
+
+  return (
+    <motion.div
+      initial={false}
+      animate={{ x: settingsOpen ? 0 : "100%" }}
+      transition={{ type: "tween", duration: 0.22, ease: [0.32, 0.72, 0, 1] }}
+      className={cn(
+        "fixed right-0 bottom-0 z-50 flex h-full min-h-0 w-full max-w-full flex-col border-l border-border/80 bg-card shadow-2xl sm:w-104",
+        isElectron ? "top-10" : "top-0",
+        !settingsOpen && "pointer-events-none",
+      )}
+      aria-hidden={!settingsOpen}
+    >
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-border/70 px-5 sm:px-6">
+        <span className="font-bold text-base">Settings</span>
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(false)}
+          className="h-8 w-8 flex items-center justify-center rounded-full hover:bg-muted/70 transition-colors"
+        >
+          <X className="h-4 w-4 text-muted-foreground" />
+        </button>
+      </div>
+
+      {settingsOpen ? (
+        <SettingsDrawerBody setSettingsOpen={setSettingsOpen} openPreferencesEditor={openPreferencesEditor} />
+      ) : (
+        <div className="min-h-0 flex-1" aria-hidden />
+      )}
     </motion.div>
   )
 }
@@ -926,7 +925,7 @@ function RootLayout() {
           {/* Desktop side rail */}
           <aside className="hidden sm:flex fixed right-5 top-1/2 -translate-y-1/2 z-40 flex-col gap-1 rounded-2xl border border-white/10 bg-zinc-900/90 text-zinc-100 backdrop-blur-md p-1.5 shadow-xl">
             <div className="h-10 w-10 flex items-center justify-center mb-1 rounded-xl bg-white/12 ring-1 ring-white/20 shadow-sm">
-              <img src={logoSrc} alt="Duwit logo" className="h-9 w-9 object-contain brightness-110" />
+              <img src={getLogoUrl()} alt="Duwit logo" className="h-9 w-9 object-contain brightness-110" />
             </div>
             {tabs.map(({ to, icon: Icon, label }) => {
               const isActive = currentPath === to
@@ -1096,7 +1095,7 @@ function RootLayout() {
                 }`}
               >
                 <div className="h-10 w-10 flex items-center justify-center mb-1 rounded-xl bg-white/12 ring-1 ring-white/20 shadow-sm">
-                  <img src={logoSrc} alt="Duwit logo" className="h-9 w-9 object-contain brightness-110" />
+                  <img src={getLogoUrl()} alt="Duwit logo" className="h-9 w-9 object-contain brightness-110" />
                 </div>
                 {tabs.map(({ to, icon: Icon, label }) => {
                   const isActive = currentPath === to
@@ -1154,7 +1153,7 @@ function RootLayout() {
 
       {settingsOpen && (
         <div
-          className={`fixed z-40 bg-black/50 backdrop-blur-sm ${
+          className={`fixed z-40 bg-black/55 ${
             isElectron ? "inset-x-0 bottom-0 top-10" : "inset-0"
           }`}
           onClick={() => setSettingsOpen(false)}

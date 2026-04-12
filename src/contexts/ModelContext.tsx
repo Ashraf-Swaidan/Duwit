@@ -25,6 +25,16 @@ export const MODEL_GROUPS = [
     label: "Gemma",
     models: [
       { id: "gemma-3-27b-it", name: "Gemma 3 27B", description: "Default · Free tier" },
+      {
+        id: "gemma-4-31b-it",
+        name: "Gemma 4 31B",
+        description: "Dense · Often higher quota than Gemma 3 on Vertex",
+      },
+      {
+        id: "gemma-4-26b-a4b-it",
+        name: "Gemma 4 26B (MoE)",
+        description: "MoE A4B · Lower cost than 31B",
+      },
     ],
   },
   {

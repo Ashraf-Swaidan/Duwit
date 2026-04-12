@@ -2,7 +2,12 @@ import { useState, useRef, useEffect } from "react"
 import { ArrowLeft, Send, Zap, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { auth } from "@/lib/firebase"
-import { callAIStream, callAIStructured } from "@/services/ai"
+import {
+  callAIStream,
+  callAIStructured,
+  isVertexRateLimitError,
+  VERTEX_RATE_LIMIT_USER_MESSAGE,
+} from "@/services/ai"
 import {
   GOAL_CHAT_SYSTEM_PROMPT,
   PLAN_READY_MARKER,
@@ -112,11 +117,18 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
       const isReady = response.includes(PLAN_READY_MARKER)
       setMessages([...updated, { role: "assistant", content: cleanStreamText(response) }])
       if (isReady) setPlanReady(true)
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Sorry, I had trouble responding. Please try again." },
-      ])
+    } catch (err) {
+      const fallback = "Sorry, I had trouble responding. Please try again."
+      const content = isVertexRateLimitError(err) ? VERTEX_RATE_LIMIT_USER_MESSAGE : fallback
+      setMessages((prev) => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        if (last?.role === "assistant" && last.content === "") {
+          next[next.length - 1] = { role: "assistant", content }
+          return next
+        }
+        return [...next, { role: "assistant", content }]
+      })
     } finally {
       setSending(false)
     }
@@ -186,11 +198,15 @@ export function GoalChat({ onSuccess, onBack }: GoalChatProps) {
       onSuccess(goalId)
     } catch (e) {
       console.error("Plan generation error:", e)
-      setGenError(
-        step === "lessons"
-          ? "Couldn't generate lessons for one part of your plan. Try again or shorten the goal."
-          : "Couldn't generate the plan. Please try again.",
-      )
+      if (isVertexRateLimitError(e)) {
+        setGenError(VERTEX_RATE_LIMIT_USER_MESSAGE)
+      } else {
+        setGenError(
+          step === "lessons"
+            ? "Couldn't generate lessons for one part of your plan. Try again or shorten the goal."
+            : "Couldn't generate the plan. Please try again.",
+        )
+      }
       setGenerating(false)
     }
   }

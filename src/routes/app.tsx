@@ -12,7 +12,13 @@ import {
   saveCachedGreeting,
   type CachedGreeting,
 } from "@/services/userContext"
-import { callAI, callAIStream, generateImage } from "@/services/ai"
+import {
+  callAI,
+  callAIStream,
+  generateImage,
+  isVertexRateLimitError,
+  VERTEX_RATE_LIMIT_USER_MESSAGE,
+} from "@/services/ai"
 import { HOME_CONCIERGE_SYSTEM_PROMPT, generateHomeConciergePrompt } from "@/services/prompts"
 import { formatUserProfileForPrompt } from "@/services/user"
 import { useProfileDialog } from "@/contexts/ProfileDialogContext"
@@ -271,10 +277,17 @@ function HomePage() {
         setPendingNavGoalId(goalId)
       }
     } catch (e) {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: "Sorry, I couldn't connect right now. Try again in a moment!" },
-      ])
+      const fallback = "Sorry, I couldn't connect right now. Try again in a moment!"
+      const content = isVertexRateLimitError(e) ? VERTEX_RATE_LIMIT_USER_MESSAGE : fallback
+      setMessages((prev) => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        if (last?.role === 'assistant' && last.content === '') {
+          next[next.length - 1] = { role: 'assistant', content }
+          return next
+        }
+        return [...next, { role: 'assistant', content }]
+      })
     } finally {
       setIsThinking(false)
     }

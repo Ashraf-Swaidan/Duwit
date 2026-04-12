@@ -3,7 +3,7 @@ import { motion } from "motion/react"
 import { Layers, ListChecks, Map, MessageCircle, Sparkles, Target } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-const logoSrc = `${import.meta.env.BASE_URL}logo.svg`
+import { getLogoUrl } from "@/lib/logoUrl"
 
 /**
  * Light Duwit-themed ornament: goals, home chat, plan phases, tasks, path, coach sparkle.
@@ -87,7 +87,7 @@ export function LoginArtMotifs() {
 
       {/* Faint mark — same asset as app chrome */}
       <img
-        src={logoSrc}
+        src={getLogoUrl()}
         alt=""
         className="absolute bottom-5 right-5 h-18 w-18 opacity-[0.06] saturate-0 sm:bottom-8 sm:right-8 sm:h-28 sm:w-28 dark:opacity-[0.09]"
       />

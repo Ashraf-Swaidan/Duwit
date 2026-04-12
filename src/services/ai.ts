@@ -2,6 +2,27 @@ import { getModelInstance, model as defaultModel } from "@/lib/firebase"
 
 export type StreamChunkCallback = (partial: string) => void
 
+/** User-facing copy when Vertex / Firebase returns 429 (common on busy Gemma tiers). */
+export const VERTEX_RATE_LIMIT_USER_MESSAGE =
+  "This model hit a temporary usage limit (too many requests). Open Settings and try another model — Gemini or Pollinations often work when Gemma is rate-limited."
+
+export function isVertexRateLimitError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  const lower = msg.toLowerCase()
+  if (
+    lower.includes("429") ||
+    lower.includes("too many requests") ||
+    lower.includes("resource exhausted") ||
+    lower.includes("resource_exhausted")
+  ) {
+    return true
+  }
+  const o = err as { status?: number; code?: string | number; error?: { status?: number } }
+  if (o?.status === 429 || o?.error?.status === 429) return true
+  if (String(o?.code) === "429") return true
+  return false
+}
+
 /** Citations / queries from Gemini Google Search grounding (when present). */
 export interface WebGroundingInfo {
   webSearchQueries: string[]

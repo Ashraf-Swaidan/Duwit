@@ -34,7 +34,13 @@ import {
   maybeCompressTaskChatIntoGoalState,
 } from "@/services/goalState"
 import { auth } from "@/lib/firebase"
-import { callAIStream, generateImage, type WebGroundingInfo } from "@/services/ai"
+import {
+  callAIStream,
+  generateImage,
+  isVertexRateLimitError,
+  VERTEX_RATE_LIMIT_USER_MESSAGE,
+  type WebGroundingInfo,
+} from "@/services/ai"
 import { generateTaskGuideSystemPrompt, generateTaskSuggestedPrompt } from "@/services/prompts"
 import { useModel } from "@/contexts/ModelContext"
 import { Markdown } from "@/components/Markdown"
@@ -832,11 +838,18 @@ export function TaskChat({
           })
           .catch(() => {})
       }
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Sorry, couldn't get a response. Please try again." },
-      ])
+    } catch (err) {
+      const fallback = "Sorry, couldn't get a response. Please try again."
+      const content = isVertexRateLimitError(err) ? VERTEX_RATE_LIMIT_USER_MESSAGE : fallback
+      setMessages((prev) => {
+        const next = [...prev]
+        const last = next[next.length - 1]
+        if (last?.role === "assistant" && last.content === "") {
+          next[next.length - 1] = { role: "assistant", content }
+          return next
+        }
+        return [...next, { role: "assistant", content }]
+      })
       setWebSearchStreamPhase("idle")
       setStreamingGrounding(null)
     } finally {
