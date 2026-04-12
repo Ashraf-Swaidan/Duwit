@@ -44,6 +44,8 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Default 2 MiB rejects large bundles; main chunk can exceed that after minification.
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         navigateFallback: "index.html",
         runtimeCaching: [
@@ -69,5 +71,9 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+  },
+  build: {
+    // kB; main bundle includes heavy deps (charts, markdown, mermaid path, etc.)
+    chunkSizeWarningLimit: 3000,
   },
 })
